@@ -25,10 +25,10 @@ content_layers = ['block4_conv2']
 # 我们感兴趣的风格层
 style_layers = ['block2_conv2',
                 'block3_conv2', 
-                'block5_conv2']
+                'block4_conv2']
 
-style_weight=10
-content_weight=10
+style_weight=500000
+content_weight=100000
 
 
 #------------------------------------------------------------
@@ -123,9 +123,6 @@ class CSFlow:
                     T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
                     I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
                     patches_HWCN_i = cs_flow.patch_decomposition(T_features_i)
-                    print("patches decomposition I_features_i:{}".format(I_features_i.shape))
-                    print("patches decomposition T_features_i:{}".format(T_features_i.shape))
-                    print("patches decomposition next。patches:{}".format(patches_HWCN_i.shape))
                     cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
                                                         padding='VALID', name='cosine_dist')
                     cosine_dist_l.append(cosine_dist_i)
@@ -360,8 +357,8 @@ def style_content_loss(outputs,style_targets,content_targets):
     # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
     #                          for name in content_outputs.keys()])
 
-    print("content_outputs:{}".format(content_outputs.keys()))
-    print("content_targets:{}".format(content_targets.keys()))
+    # print("content_outputs:{}".format(content_outputs.keys()))
+    # print("content_targets:{}".format(content_targets.keys()))
     content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.5)) for name in content_outputs.keys()])
     content_loss *= content_weight / num_content_layers
     print("content_loss:{}".format(content_loss))
@@ -389,7 +386,7 @@ def run(content_path,style_path):
 
     start = time.time()
 
-    epochs = 10
+    epochs = 100
     steps_per_epoch = 10
 
     step = 0
@@ -401,7 +398,7 @@ def run(content_path,style_path):
         display.clear_output(wait=True)
         display.display(tensor_to_image(image))
         print("Train step: {}".format(step))
-        tensor_to_image(image).save("test{}.png".format(n))
+        tensor_to_image(image).save("test{}.png".format(n)) if step % 100 == 0 else print("")
     end = time.time()
     print("Total time: {:.1f}".format(end-start))
 
@@ -415,6 +412,7 @@ def train_step(image,extractor,style_targets,content_targets,opt):
 
     print("loss:{}".format(loss))
     grad = tape.gradient(loss, image)
+    # print("grad:{}".format(grad))
     opt.apply_gradients([(grad, image)])
     image.assign(clip_0_1(image))
 
