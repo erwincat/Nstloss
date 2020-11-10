@@ -140,6 +140,7 @@ def style_content_loss(outputs,style_targets,content_targets):
                              for name in content_outputs.keys()])
     content_loss *= content_weight / num_content_layers
     loss = style_loss + content_loss
+    print("loss:{},style_loss:{},content_loss:{}".format(loss,style_loss,content_loss))
     return loss
 
 
