@@ -28,7 +28,7 @@ style_layers = ['block2_conv2',
                 'block4_conv2']
 
 style_weight=500000
-content_weight=100000
+content_weight=300000
 
 
 #------------------------------------------------------------
@@ -386,8 +386,8 @@ def run(content_path,style_path):
 
     start = time.time()
 
-    epochs = 100
-    steps_per_epoch = 10
+    epochs = 50
+    steps_per_epoch = 20
 
     step = 0
     for n in range(epochs):
