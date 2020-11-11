@@ -10,6 +10,38 @@ import numpy as np
 import PIL.Image
 import time
 import functools
+import argparse
+
+
+
+#---------------------------------------------------------------------------------------------------------------------
+parser = argparse.ArgumentParser(description='Generate a new image by applying style onto a content image.',
+                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+add_arg = parser.add_argument
+
+add_arg('--content',        default=None, type=str,         help='Content image path as optimization target.')
+add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
+add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
+add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
+add_arg('--style-weight',   default=200000.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
+add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
+add_arg('--semantic-weight', default=100000.0, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
+add_arg('--output-size',    default=None, type=str,         help='Size of the output image, e.g. 512x512.')
+add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
+add_arg('--slices',         default=2, type=int,            help='Split patches up into this number of batches.')
+add_arg('--cache',          default=0, type=int,            help='Whether to compute matches only once.')
+add_arg('--smoothness',     default=1E+0, type=float,       help='Weight of image smoothing scheme.')
+add_arg('--variety',        default=0.0, type=float,        help='Bias toward selecting diverse patches, e.g. 0.5.')
+add_arg('--seed',           default='noise', type=str,      help='Seed image path, "noise" or "content".')
+add_arg('--seed-range',     default='16:240', type=str,     help='Random colors chosen in range, e.g. 0:255.')
+add_arg('--iterations',     default=100, type=int,          help='Number of iterations to run each resolution.')
+add_arg('--device',         default='cpu', type=str,        help='Index of the GPU number to use, for theano.')
+add_arg('--print-every',    default=10, type=int,           help='How often to log statistics to stdout.')
+add_arg('--save-every',     default=10, type=int,           help='How frequently to save PNG into `frames`.')
+args = parser.parse_args()
+#---------------------------------------------------------------------------------------------------------------------
 
 def tensor_to_image(tensor):
   tensor = tensor*255
@@ -20,15 +52,15 @@ def tensor_to_image(tensor):
   return PIL.Image.fromarray(tensor)
 
 # 内容层将提取出我们的 feature maps （特征图）
-content_layers = ['block4_conv2'] 
+# content_layers = ['block4_conv2'] 
 
-# 我们感兴趣的风格层
-style_layers = ['block2_conv2',
-                'block3_conv2', 
-                'block4_conv2']
+# # 我们感兴趣的风格层
+# style_layers = ['block2_conv2',
+#                 'block3_conv2', 
+#                 'block4_conv2']
 
-style_weight=500000
-content_weight=300000
+# style_weight=500000
+# content_weight=300000
 
 
 #------------------------------------------------------------
@@ -340,9 +372,10 @@ class StyleContentModel(tf.keras.models.Model):
 def clip_0_1(image):
   	return tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=1.0)
 
-num_content_layers = len(content_layers)
-num_style_layers = len(style_layers)
+
 def style_content_loss(outputs,style_targets,content_targets):
+    num_content_layers = len(args.content_layers.split(','))
+    num_style_layers = len(args.style_layers.split(','))
     style_outputs = outputs['style']
     content_outputs = outputs['content']
     # style_loss = tf.add_n([tf.reduce_mean((style_outputs[name]-style_targets[name])**2) 
@@ -350,8 +383,8 @@ def style_content_loss(outputs,style_targets,content_targets):
 
 
     #有待改进，重复
-    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.5)) for name in style_outputs.keys()])
-    style_loss *= style_weight / num_style_layers
+    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.2)) for name in style_outputs.keys()])
+    style_loss *= args.style_weight / num_style_layers
 
     print("style_loss:{}".format(style_loss))
     # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
@@ -359,8 +392,8 @@ def style_content_loss(outputs,style_targets,content_targets):
 
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
-    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.5)) for name in content_outputs.keys()])
-    content_loss *= content_weight / num_content_layers
+    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
+    content_loss *= args.content_weight / num_content_layers
     print("content_loss:{}".format(content_loss))
     loss = style_loss + content_loss
     return loss
@@ -373,7 +406,7 @@ def style_content_loss(outputs,style_targets,content_targets):
 def run(content_path,style_path):
     content_image = load_img(content_path)
     style_image = load_img(style_path)
-    extractor = StyleContentModel(style_layers, content_layers)
+    extractor = StyleContentModel(args.style_layers.split(","), args.content_layers.split(","))
     style_targets = extractor(style_image)['style']
     content_targets = extractor(content_image)['content']
 
@@ -382,29 +415,30 @@ def run(content_path,style_path):
 
     image = tf.Variable(content_image) #
 
-    opt = tf.optimizers.Adam(learning_rate=0.02, beta_1=0.99, epsilon=1e-1)
+    opt = tf.optimizers.Adam(learning_rate=0.05, beta_1=0.99, epsilon=1e-1)
 
     start = time.time()
 
     epochs = 50
-    steps_per_epoch = 20
+    steps_per_epoch = 10
 
     step = 0
-    for n in range(epochs):
+    loss = 100010
+    while loss > 100000:
         for m in range(steps_per_epoch):
             step += 1
-            train_step(image,extractor,style_targets,content_targets,opt)
+            loss = train_step(image,extractor,style_targets,content_targets,opt)
             print(".", end='')
         display.clear_output(wait=True)
         display.display(tensor_to_image(image))
         print("Train step: {}".format(step))
-        tensor_to_image(image).save("test{}.png".format(n)) if step % 100 == 0 else print("")
+        tensor_to_image(image).save("test{}.png".format(step))
     end = time.time()
     print("Total time: {:.1f}".format(end-start))
 
-    tensor_to_image(image).save("test.png")
+    tensor_to_image(image).save(args.output)
 
-@tf.function()
+# @tf.function()
 def train_step(image,extractor,style_targets,content_targets,opt):
     with tf.GradientTape() as tape:
         outputs = extractor(image)
@@ -415,10 +449,11 @@ def train_step(image,extractor,style_targets,content_targets,opt):
     # print("grad:{}".format(grad))
     opt.apply_gradients([(grad, image)])
     image.assign(clip_0_1(image))
+    return loss
 
 
 if __name__ == "__main__":
-	run("samples/dog.png","samples/cat.png")
+	run(args.content,args.style)
 
   	
 
