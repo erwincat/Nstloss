@@ -20,15 +20,15 @@ parser = argparse.ArgumentParser(description='Generate a new image by applying s
 add_arg = parser.add_argument
 
 add_arg('--content',        default=None, type=str,         help='Content image path as optimization target.')
-add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
+add_arg('--content-weight', default=10000.0, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=200000.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=20000.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=100000.0, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--semantic-weight', default=10000.0, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
-add_arg('--output-size',    default=None, type=str,         help='Size of the output image, e.g. 512x512.')
+add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
 add_arg('--slices',         default=2, type=int,            help='Split patches up into this number of batches.')
 add_arg('--cache',          default=0, type=int,            help='Whether to compute matches only once.')
@@ -386,7 +386,7 @@ def style_content_loss(outputs,style_targets,content_targets):
     style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.2)) for name in style_outputs.keys()])
     style_loss *= args.style_weight / num_style_layers
 
-    print("style_loss:{}".format(style_loss))
+    tf.print("style_loss:{}",style_loss)
     # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
     #                          for name in content_outputs.keys()])
 
@@ -394,7 +394,7 @@ def style_content_loss(outputs,style_targets,content_targets):
     # print("content_targets:{}".format(content_targets.keys()))
     content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
     content_loss *= args.content_weight / num_content_layers
-    print("content_loss:{}".format(content_loss))
+    tf.print("content_loss:{}",content_loss)
     loss = style_loss + content_loss
     return loss
 
@@ -413,7 +413,12 @@ def run(content_path,style_path):
     # results = extractor(tf.constant(content_image))
     # style_results = results['style']
 
-    image = tf.Variable(content_image) #
+    outputSize=args.output_size.split(",")
+    outputImage_height= outputSize[0]
+    outputImage_wight = outputSize[1]
+    print("height,wit={}".format(outputImage_height))
+
+    image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float32,initializer=tf.zeros_initializer) #
 
     opt = tf.optimizers.Adam(learning_rate=0.05, beta_1=0.99, epsilon=1e-1)
 
@@ -423,8 +428,8 @@ def run(content_path,style_path):
     steps_per_epoch = 10
 
     step = 0
-    loss = 100010
-    while loss > 100000:
+    loss = 10001
+    while loss > 10000:
         for m in range(steps_per_epoch):
             step += 1
             loss = train_step(image,extractor,style_targets,content_targets,opt)
@@ -432,19 +437,19 @@ def run(content_path,style_path):
         display.clear_output(wait=True)
         display.display(tensor_to_image(image))
         print("Train step: {}".format(step))
-        tensor_to_image(image).save("test{}.png".format(step))
+        tensor_to_image(image).save("test{}.png".format(step)) if step % 100 == 0 else print("")
     end = time.time()
     print("Total time: {:.1f}".format(end-start))
 
     tensor_to_image(image).save(args.output)
 
-# @tf.function()
+@tf.function()
 def train_step(image,extractor,style_targets,content_targets,opt):
     with tf.GradientTape() as tape:
         outputs = extractor(image)
         loss = style_content_loss(outputs,style_targets,content_targets)
 
-    print("loss:{}".format(loss))
+    tf.print("loss:{}",loss)
     grad = tape.gradient(loss, image)
     # print("grad:{}".format(grad))
     opt.apply_gradients([(grad, image)])
