@@ -386,7 +386,7 @@ def style_content_loss(outputs,style_targets,content_targets):
     style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.2)) for name in style_outputs.keys()])
     style_loss *= args.style_weight / num_style_layers
 
-    tf.print("style_loss:{}",style_loss)
+    tf.print("style_loss:",style_loss)
     # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
     #                          for name in content_outputs.keys()])
 
@@ -394,7 +394,7 @@ def style_content_loss(outputs,style_targets,content_targets):
     # print("content_targets:{}".format(content_targets.keys()))
     content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
     content_loss *= args.content_weight / num_content_layers
-    tf.print("content_loss:{}",content_loss)
+    tf.print("content_loss:",content_loss)
     loss = style_loss + content_loss
     return loss
 
@@ -449,7 +449,7 @@ def train_step(image,extractor,style_targets,content_targets,opt):
         outputs = extractor(image)
         loss = style_content_loss(outputs,style_targets,content_targets)
 
-    tf.print("loss:{}",loss)
+    tf.print("loss:",loss)
     grad = tape.gradient(loss, image)
     # print("grad:{}".format(grad))
     opt.apply_gradients([(grad, image)])
