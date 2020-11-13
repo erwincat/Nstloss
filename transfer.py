@@ -420,7 +420,7 @@ def run(content_path,style_path):
 
     image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float32,initializer=tf.zeros_initializer) #
 
-    opt = tf.optimizers.Adam(learning_rate=0.05, beta_1=0.99, epsilon=1e-1)
+    opt = tf.optimizers.Adam(learning_rate=0.05, beta_1=0.9,beta_2=0.999, epsilon=1e-1)
 
     start = time.time()
 
