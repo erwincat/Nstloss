@@ -437,7 +437,7 @@ def run(content_path,style_path):
         display.clear_output(wait=True)
         display.display(tensor_to_image(image))
         print("Train step: {}".format(step))
-        tensor_to_image(image).save("test{}.png".format(step)) if step % 100 == 0 else print("")
+        tensor_to_image(image).save("frame/test{}.png".format(step)) if step % 100 == 0 else print("")
     end = time.time()
     print("Total time: {:.1f}".format(end-start))
 
