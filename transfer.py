@@ -458,8 +458,6 @@ def run(content_path,style_path):
         for m in range(steps_per_epoch):
             step += 1
             loss = train_step(image,extractor,style_targets,content_targets,opt)
-            loginfo = {"step":step,"loss":loss}
-            logger.debug(loginfo)
             print(".", end='')
         display.clear_output(wait=True)
         display.display(tensor_to_image(image))
@@ -477,7 +475,7 @@ def train_step(image,extractor,style_targets,content_targets,opt):
         outputs = extractor(image)
         loss = style_content_loss(outputs,style_targets,content_targets)
 
-    tf.print("loss:",loss)
+    logger.debug("loss:%s",loss)
     grad = tape.gradient(loss, image)
     # print("grad:{}".format(grad))
     opt.apply_gradients([(grad, image)])
