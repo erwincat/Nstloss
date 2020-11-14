@@ -11,6 +11,8 @@ import PIL.Image
 import time
 import functools
 import argparse
+import logging
+import os.path
 
 
 
@@ -20,13 +22,13 @@ parser = argparse.ArgumentParser(description='Generate a new image by applying s
 add_arg = parser.add_argument
 
 add_arg('--content',        default=None, type=str,         help='Content image path as optimization target.')
-add_arg('--content-weight', default=10000.0, type=float,       help='Weight of content relative to style.')
+add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=20000.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=10000.0, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--semantic-weight', default=10.0, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -42,6 +44,30 @@ add_arg('--print-every',    default=10, type=int,           help='How often to l
 add_arg('--save-every',     default=10, type=int,           help='How frequently to save PNG into `frames`.')
 args = parser.parse_args()
 #---------------------------------------------------------------------------------------------------------------------
+
+#---------------------------------------------------------------------------------------------------------------------
+#logging
+#---------------------------------------------------------------------------------------------------------------------
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+ch = logging.StreamHandler()
+ch.setLevel(logging.WARNING)
+
+rq = time.strftime('%Y%m%d%H%M', time.localtime(time.time()))
+log_path = os.path.dirname(os.getcwd()) + '/Logs/'
+log_name = log_path + rq + '.log'
+logfile = log_name
+fh = logging.FileHandler(logfile, mode='w')
+fh.setLevel(logging.DEBUG)  # 输出到file的log等级的开关
+formatter = logging.Formatter("%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s")
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+
+
+#---------------------------------------------------------------------------------------------------------------------
+
 
 def tensor_to_image(tensor):
   tensor = tensor*255
@@ -381,14 +407,14 @@ def style_content_loss(outputs,style_targets,content_targets):
     # style_loss = tf.add_n([tf.reduce_mean((style_outputs[name]-style_targets[name])**2) 
     #                        for name in style_outputs.keys()])
 
-
+    tf.print("num_style_layers:",num_style_layers)
     #有待改进，重复
     style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.2)) for name in style_outputs.keys()])
     style_loss *= args.style_weight / num_style_layers
 
     tf.print("style_loss:",style_loss)
     # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
-    #                          for name in content_outputs.keys()])
+                             # for name in content_outputs.keys()])
 
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
@@ -414,30 +440,32 @@ def run(content_path,style_path):
     # style_results = results['style']
 
     outputSize=args.output_size.split(",")
-    outputImage_height= outputSize[0]
-    outputImage_wight = outputSize[1]
+    outputImage_height= content_image.shape[1]
+    outputImage_wight = content_image.shape[2]
     print("height,wit={}".format(outputImage_height))
 
-    image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float32,initializer=tf.zeros_initializer) #
-
-    opt = tf.optimizers.Adam(learning_rate=0.05, beta_1=0.9,beta_2=0.999, epsilon=1e-1)
+    # image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float32,initializer=tf.zeros_initializer) #
+    image = tf.Variable(content_image)
+    opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
 
-    epochs = 50
-    steps_per_epoch = 10
+    epochs = 10
+    steps_per_epoch = 100
 
     step = 0
-    loss = 10001
-    while loss > 10000:
+    for n in range(epochs):
         for m in range(steps_per_epoch):
             step += 1
             loss = train_step(image,extractor,style_targets,content_targets,opt)
+            loginfo = {"step":step,"loss":loss}
+            logger.debug(loginfo)
             print(".", end='')
         display.clear_output(wait=True)
         display.display(tensor_to_image(image))
         print("Train step: {}".format(step))
-        tensor_to_image(image).save("frame/test{}.png".format(step)) if step % 100 == 0 else print("")
+        print("time: {:.1f}".format(time.time()-start))
+        tensor_to_image(image).save("frame/test{}.png".format(n+1))
     end = time.time()
     print("Total time: {:.1f}".format(end-start))
 
