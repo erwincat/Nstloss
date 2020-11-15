@@ -444,8 +444,8 @@ def run(content_path,style_path):
     outputImage_wight = outputSize[1]
     print("height,wit={}".format(outputImage_height))
 
-    image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
-    # image = tf.Variable(content_image)
+    # image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
