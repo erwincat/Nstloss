@@ -48,22 +48,22 @@ args = parser.parse_args()
 #---------------------------------------------------------------------------------------------------------------------
 #logging
 #---------------------------------------------------------------------------------------------------------------------
-logger = logging.getLogger()
+logger = logging.getLogger("tensorflow")
 logger.setLevel(logging.INFO)
-ch = logging.StreamHandler()
-ch.setLevel(logging.WARNING)
+# ch = logging.StreamHandler()
+# ch.setLevel(logging.DEBUG)
 
 rq = time.strftime('%Y%m%d%H%M', time.localtime(time.time()))
-log_path = os.path.dirname(os.getcwd()) + '/Logs/'
-log_name = log_path + rq + '.log'
-logfile = log_name
+# log_path = os.path.dirname(os.getcwd()) + '/Logs/'
+# log_name = log_path + rq + '.log'
+logfile = rq + ".log"
 fh = logging.FileHandler(logfile, mode='w')
 fh.setLevel(logging.DEBUG)  # 输出到file的log等级的开关
 formatter = logging.Formatter("%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s")
 fh.setFormatter(formatter)
+# ch.setFormatter(formatter)
 logger.addHandler(fh)
-ch.setFormatter(formatter)
-logger.addHandler(ch)
+# logger.addHandler(ch)
 
 
 #---------------------------------------------------------------------------------------------------------------------
@@ -440,12 +440,12 @@ def run(content_path,style_path):
     # style_results = results['style']
 
     outputSize=args.output_size.split(",")
-    outputImage_height= content_image.shape[1]
-    outputImage_wight = content_image.shape[2]
+    outputImage_height= outputSize[0]
+    outputImage_wight = outputSize[1]
     print("height,wit={}".format(outputImage_height))
 
-    # image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float32,initializer=tf.zeros_initializer) #
-    image = tf.Variable(content_image)
+    image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    # image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
@@ -475,7 +475,8 @@ def train_step(image,extractor,style_targets,content_targets,opt):
         outputs = extractor(image)
         loss = style_content_loss(outputs,style_targets,content_targets)
 
-    logger.debug("loss:%s",loss)
+    # tf.compat.v1.logging.info("loss:%f",float(loss))
+    tf.print("loss:",loss)
     grad = tape.gradient(loss, image)
     # print("grad:{}".format(grad))
     opt.apply_gradients([(grad, image)])
