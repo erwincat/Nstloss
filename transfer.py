@@ -98,15 +98,15 @@ def load_img(path_to_img):
   max_dim = 512
   img = tf.io.read_file(path_to_img)
   img = tf.image.decode_image(img, channels=3)
-  img = tf.image.convert_image_dtype(img, tf.float32)
+  img = tf.image.convert_image_dtype(img, tf.float64)
 
-  shape = tf.cast(tf.shape(img)[:-1], tf.float32)
-  long_dim = max(shape)
-  scale = max_dim / long_dim
+  # shape = tf.cast(tf.shape(img)[:-1], tf.float64)
+  # long_dim = max(shape)
+  # scale = max_dim / long_dim
 
-  new_shape = tf.cast(shape * scale, tf.int32)
+  # new_shape = tf.cast(shape * scale, tf.int32)
 
-  img = tf.image.resize(img, new_shape)
+  # img = tf.image.resize(img, new_shape)
   img = img[tf.newaxis, :]
   return img
 
@@ -296,6 +296,7 @@ def CX_loss(T_features, I_features, nnsigma=float(1.0)):
 def random_sampling(tensor_NHWC, n, indices=None):
     N, H, W, C = tf.convert_to_tensor(tensor_NHWC).shape.as_list()
     S = H * W
+    tf.print("s:",S)
     tensor_NSC = tf.reshape(tensor_NHWC, [N, S, C])
     all_indices = list(range(S))
     shuffled_indices = tf.random.shuffle(all_indices)
@@ -305,27 +306,33 @@ def random_sampling(tensor_NHWC, n, indices=None):
     return res, indices
 
 
-def random_pooling(feats, output_1d_size=100):
-    is_input_tensor = type(feats) is tf.Tensor
+def random_pooling(T_features, I_features, output_1d_size=100):
+    # is_input_tensor = type(feats) is tf.Tensor
 
-    if is_input_tensor:
-        feats = [feats]
+    # if is_input_tensor:
+    #     feats = [feats]
 
-    # convert all inputs to tensors
-    feats = [tf.convert_to_tensor(feats_i) for feats_i in feats]
+    # # convert all inputs to tensors
+    # feats = [tf.convert_to_tensor(feats_i) for feats_i in feats]
 
-    N, H, W, C = feats[0].shape.as_list()
-    feats_sampled_0, indices = random_sampling(feats[0], output_1d_size ** 2)
-    tf.print("rs end")
-    res = [feats_sampled_0]
-    for i in range(1, len(feats)):
-        feats_sampled_i, _ = random_sampling(feats[i], -1, indices)
-        tf.print("rsp end")
-        res.append(feats_sampled_i)
+    N, T_H, T_W, C = T_features.shape.as_list()
+    _, I_H, I_W, _ = I_features.shape.as_list()
+    if T_H * T_W < I_H * I_W:
+        T_feats_sampled, indices = random_sampling(T_features, output_1d_size ** 2)
+        I_feats_sampled, _ = random_sampling(I_features, -1, indices)
+    else:
+        I_feats_sampled, indices = random_sampling(I_features, output_1d_size ** 2)
+        T_feats_sampled, _ = random_sampling(T_features, -1, indices)
+    # tf.print("rs end")
+    res = [T_feats_sampled,I_feats_sampled]
+    # for i in range(1, len(feats)):
+    #     feats_sampled_i, _ = random_sampling(feats[i], -1, indices)
+    #     tf.print("rsp end")
+    #     res.append(feats_sampled_i)
 
     res = [tf.reshape(feats_sampled_i, [N, output_1d_size, output_1d_size, C]) for feats_sampled_i in res]
-    if is_input_tensor:
-        return res[0]
+    # if is_input_tensor:
+    #     return res[0]
     return res
 
 
@@ -349,7 +356,7 @@ def CX_loss_helper(T_features, I_features,nnsigma=float(0.5)):
     if fH * fW <= 65 ** 2:
         print(' #### Skipping pooling for CX....')
     else:
-        T_features, I_features = random_pooling([T_features, I_features], output_1d_size=65)
+        T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
 
     loss = CX_loss(T_features, I_features,nnsigma)
     print("LOSS:{}".format(loss))
@@ -444,8 +451,8 @@ def run(content_path,style_path):
     outputImage_height= outputSize[0]
     outputImage_wight = outputSize[1]
 
-    # image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
-    image = tf.Variable(content_image)
+    image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    # image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
@@ -469,7 +476,7 @@ def run(content_path,style_path):
 
     tensor_to_image(image).save(args.output)
 
-@tf.function()
+# @tf.function()
 def train_step(image,extractor,style_targets,content_targets,opt):
     with tf.GradientTape() as tape:
         outputs = extractor(image)
