@@ -316,9 +316,11 @@ def random_pooling(feats, output_1d_size=100):
 
     N, H, W, C = feats[0].shape.as_list()
     feats_sampled_0, indices = random_sampling(feats[0], output_1d_size ** 2)
+    tf.print("rs end")
     res = [feats_sampled_0]
     for i in range(1, len(feats)):
         feats_sampled_i, _ = random_sampling(feats[i], -1, indices)
+        tf.print("rsp end")
         res.append(feats_sampled_i)
 
     res = [tf.reshape(feats_sampled_i, [N, output_1d_size, output_1d_size, C]) for feats_sampled_i in res]
@@ -343,7 +345,6 @@ def CX_loss_helper(T_features, I_features,nnsigma=float(0.5)):
     # if CX_config.crop_quarters is True:
     #     T_features = crop_quarters(T_features)
     #     I_features = crop_quarters(I_features)
-
     N, fH, fW, fC = T_features.shape.as_list()
     if fH * fW <= 65 ** 2:
         print(' #### Skipping pooling for CX....')
@@ -442,15 +443,14 @@ def run(content_path,style_path):
     outputSize=args.output_size.split(",")
     outputImage_height= outputSize[0]
     outputImage_wight = outputSize[1]
-    print("height,wit={}".format(outputImage_height))
 
-    image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
-    # image = tf.Variable(content_image)
+    # image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
 
-    epochs = 10
+    epochs = 7
     steps_per_epoch = 100
 
     step = 0
