@@ -25,7 +25,7 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=30.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
 add_arg('--semantic-weight', default=10.0, type=float,      help='Global weight of semantics vs. features.')
@@ -296,7 +296,6 @@ def CX_loss(T_features, I_features, nnsigma=float(1.0)):
 def random_sampling(tensor_NHWC, n, indices=None):
     N, H, W, C = tf.convert_to_tensor(tensor_NHWC).shape.as_list()
     S = H * W
-    tf.print("s:",S)
     tensor_NSC = tf.reshape(tensor_NHWC, [N, S, C])
     all_indices = list(range(S))
     shuffled_indices = tf.random.shuffle(all_indices)
@@ -451,13 +450,13 @@ def run(content_path,style_path):
     outputImage_height= outputSize[0]
     outputImage_wight = outputSize[1]
 
-    image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
-    # image = tf.Variable(content_image)
+    # image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
 
-    epochs = 7
+    epochs = 10
     steps_per_epoch = 100
 
     step = 0
