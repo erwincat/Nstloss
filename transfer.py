@@ -95,10 +95,20 @@ def tensor_to_image(tensor):
 
 #加载图像，并将其最大尺寸限制为512像素
 def load_img(path_to_img):
+  basename,_=os.path.splitext(path_to_img)
+  mapname = basename + args.sematic_ext
+
   max_dim = 512
   img = tf.io.read_file(path_to_img)
   img = tf.image.decode_image(img, channels=3)
   img = tf.image.convert_image_dtype(img, tf.float64)
+  img = img[tf.newaxis, :]
+
+  imgMap = None
+  if os.path.exists(filename):
+    imgMap = tf.io.read_file(mapname)
+    imgMap = tf.image.decode_image(img,channels=3)
+    imgMap = tf.image.convert_image_dtype(imgMap,tf.float64)
 
   # shape = tf.cast(tf.shape(img)[:-1], tf.float64)
   # long_dim = max(shape)
@@ -107,8 +117,9 @@ def load_img(path_to_img):
   # new_shape = tf.cast(shape * scale, tf.int32)
 
   # img = tf.image.resize(img, new_shape)
-  img = img[tf.newaxis, :]
-  return img
+    imgMap = imgMap[tf.newaxis,:]
+
+  return img,imgMap
 
 
 #显示图像
@@ -406,7 +417,7 @@ def clip_0_1(image):
   	return tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=1.0)
 
 
-def style_content_loss(outputs,style_targets,content_targets):
+def style_content_loss(outputs,style_targets,style_map_targets,content_targets,current_map_targets):
     num_content_layers = len(args.content_layers.split(','))
     num_style_layers = len(args.style_layers.split(','))
     style_outputs = outputs['style']
@@ -425,11 +436,14 @@ def style_content_loss(outputs,style_targets,content_targets):
 
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
-    # content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
-    # content_loss *= args.content_weight / num_content_layers
+    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
+    content_loss *= args.content_weight / num_content_layers
     # tf.print("content_loss:",content_loss)
-    # loss = style_loss + content_loss
-    loss = style_loss
+
+    sem_loss = tf.add_n([CX_loss_helper(style_map_targets[name],current_map_outputs[name],float(0.2)) for name in style_outputs.keys()])
+    sem_loss *= args.semantic-weight / num_style_layers
+
+    loss = style_loss + content_loss + sem_loss
     return loss
 
 
@@ -438,11 +452,14 @@ def style_content_loss(outputs,style_targets,content_targets):
 
 
 def run(content_path,style_path):
-    content_image = load_img(content_path)
-    style_image = load_img(style_path)
+    content_image,content_map = load_img(content_path)
+    style_image,style_map = load_img(style_path)
     extractor = StyleContentModel(args.style_layers.split(","), args.content_layers.split(","))
     style_targets = extractor(style_image)['style']
     content_targets = extractor(content_image)['content']
+
+    style_map_targets = extractor(style_map)['style']
+    current_map_targets = extractor(content_map)['style']
 
     # results = extractor(tf.constant(content_image))
     # style_results = results['style']
@@ -464,7 +481,7 @@ def run(content_path,style_path):
     for n in range(epochs):
         for m in range(steps_per_epoch):
             step += 1
-            loss = train_step(image,extractor,style_targets,content_targets,opt)
+            loss = train_step(image,extractor,style_targets,style_map_targets,content_targets,current_map_targets,opt)
             print(".", end='')
         display.clear_output(wait=True)
         display.display(tensor_to_image(image))
@@ -480,7 +497,7 @@ def run(content_path,style_path):
 def train_step(image,extractor,style_targets,content_targets,opt):
     with tf.GradientTape() as tape:
         outputs = extractor(image)
-        loss = style_content_loss(outputs,style_targets,content_targets)
+        loss = style_content_loss(outputs,style_targets,style_map_targets,content_targets,current_map_targets)
 
     # tf.compat.v1.logging.info("loss:%f",float(loss))
     tf.print("loss:",loss)
