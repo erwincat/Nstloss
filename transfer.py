@@ -25,7 +25,7 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=30.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
 add_arg('--semantic-weight', default=10.0, type=float,      help='Global weight of semantics vs. features.')
@@ -425,10 +425,11 @@ def style_content_loss(outputs,style_targets,content_targets):
 
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
-    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
-    content_loss *= args.content_weight / num_content_layers
-    tf.print("content_loss:",content_loss)
-    loss = style_loss + content_loss
+    # content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
+    # content_loss *= args.content_weight / num_content_layers
+    # tf.print("content_loss:",content_loss)
+    # loss = style_loss + content_loss
+    loss = style_loss
     return loss
 
 
