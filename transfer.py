@@ -440,8 +440,10 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
     content_loss *= args.content_weight / num_content_layers
     # tf.print("content_loss:",content_loss)
 
-    sem_loss = tf.add_n([CX_loss_helper(style_map_targets[name],current_map_outputs[name],float(0.2)) for name in style_outputs.keys()])
-    sem_loss *= args.semantic-weight / num_style_layers
+    sem_loss = 0.0
+    if style_map_targets is not None and current_map_targets is not None:
+        sem_loss = tf.add_n([CX_loss_helper(style_map_targets[name],current_map_outputs[name],float(0.2)) for name in style_outputs.keys()])
+        sem_loss *= args.semantic-weight / num_style_layers
 
     loss = style_loss + content_loss + sem_loss
     return loss
@@ -458,8 +460,11 @@ def run(content_path,style_path):
     style_targets = extractor(style_image)['style']
     content_targets = extractor(content_image)['content']
 
-    style_map_targets = extractor(style_map)['style']
-    current_map_targets = extractor(content_map)['style']
+    style_map_targets = None
+    current_map_targets = None
+    if style_map is not None and content_map is not None:
+        style_map_targets = extractor(style_map)['style']
+        current_map_targets = extractor(content_map)['style']
 
     # results = extractor(tf.constant(content_image))
     # style_results = results['style']
