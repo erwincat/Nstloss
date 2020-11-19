@@ -107,7 +107,7 @@ def load_img(path_to_img):
   imgMap = None
   if os.path.exists(mapname):
     imgMap = tf.io.read_file(mapname)
-    imgMap = tf.image.decode_image(img,channels=3)
+    imgMap = tf.image.decode_image(imgMap,channels=3)
     imgMap = tf.image.convert_image_dtype(imgMap,tf.float64)
 
   # shape = tf.cast(tf.shape(img)[:-1], tf.float64)
