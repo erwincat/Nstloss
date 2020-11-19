@@ -96,7 +96,7 @@ def tensor_to_image(tensor):
 #加载图像，并将其最大尺寸限制为512像素
 def load_img(path_to_img):
   basename,_=os.path.splitext(path_to_img)
-  mapname = basename + args.sematic_ext
+  mapname = basename + args.semantic_ext
 
   max_dim = 512
   img = tf.io.read_file(path_to_img)
