@@ -443,7 +443,7 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
     sem_loss = 0.0
     if style_map_targets is not None and current_map_targets is not None:
         sem_loss = tf.add_n([CX_loss_helper(style_map_targets[name],current_map_targets[name],float(0.2)) for name in style_outputs.keys()])
-        sem_loss *= args.semantic-weight / num_style_layers
+        sem_loss *= args.semantic_weight / num_style_layers
 
     loss = style_loss + content_loss + sem_loss
     return loss
