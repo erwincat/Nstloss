@@ -499,7 +499,7 @@ def run(content_path,style_path):
     tensor_to_image(image).save(args.output)
 
 @tf.function()
-def train_step(image,extractor,style_targets,content_targets,opt):
+def train_step(image,extractor,style_targets,style_map_targets,content_targets,current_map_targets,opt):
     with tf.GradientTape() as tape:
         outputs = extractor(image)
         loss = style_content_loss(outputs,style_targets,style_map_targets,content_targets,current_map_targets)
