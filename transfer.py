@@ -429,7 +429,7 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
 
     tf.print("num_style_layers:",num_style_layers)
     #有待改进，重复
-    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_map_targets[name],style_outputs[name],,current_map_targets[name]float(0.2)) for name in style_outputs.keys()])
+    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_map_targets[name],style_outputs[name],current_map_targets[name],float(0.2)) for name in style_outputs.keys()])
     style_loss *= args.style_weight / num_style_layers
 
     tf.print("style_loss:",style_loss)
