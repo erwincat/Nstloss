@@ -358,17 +358,19 @@ def crop_quarters(feature_tensor):
     return feature_tensor
 
 
-def CX_loss_helper(T_features, I_features,nnsigma=float(0.5)):
+def CX_loss_helper(T_features,T_map_features, I_features,I_map_features,nnsigma=float(0.5)):
     # if CX_config.crop_quarters is True:
     #     T_features = crop_quarters(T_features)
     #     I_features = crop_quarters(I_features)
-    N, fH, fW, fC = T_features.shape.as_list()
+    targetFeatures = tf.concat(1,[T_features,T_map_features])
+    inputFeatures = tf.concat(1,[I_features,I_map_features])
+    N, fH, fW, fC = targetFeatures.shape.as_list()
     if fH * fW <= 65 ** 2:
         print(' #### Skipping pooling for CX....')
     else:
-        T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
+        targetFeatures, inputFeatures = random_pooling(targetFeatures, inputFeatures, output_1d_size=65)
 
-    loss = CX_loss(T_features, I_features,nnsigma)
+    loss = CX_loss(targetFeatures, inputFeatures,nnsigma)
     print("LOSS:{}".format(loss))
     return loss
 
@@ -427,7 +429,7 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
 
     tf.print("num_style_layers:",num_style_layers)
     #有待改进，重复
-    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.2)) for name in style_outputs.keys()])
+    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_map_targets[name],style_outputs[name],,current_map_targets[name]float(0.2)) for name in style_outputs.keys()])
     style_loss *= args.style_weight / num_style_layers
 
     tf.print("style_loss:",style_loss)
@@ -440,12 +442,12 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
     content_loss *= args.content_weight / num_content_layers
     # tf.print("content_loss:",content_loss)
 
-    sem_loss = 0.0
-    if style_map_targets is not None and current_map_targets is not None:
-        sem_loss = tf.add_n([CX_loss_helper(style_map_targets[name],current_map_targets[name],float(0.2)) for name in style_outputs.keys()])
-        sem_loss *= args.semantic_weight / num_style_layers
+    # sem_loss = 0.0
+    # if style_map_targets is not None and current_map_targets is not None:
+    #     sem_loss = tf.add_n([CX_loss_helper(style_map_targets[name],current_map_targets[name],float(0.2)) for name in style_outputs.keys()])
+    #     sem_loss *= args.semantic_weight / num_style_layers
 
-    loss = style_loss + content_loss + sem_loss
+    loss = style_loss + content_loss
     return loss
 
 
