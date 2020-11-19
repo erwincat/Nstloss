@@ -105,7 +105,7 @@ def load_img(path_to_img):
   img = img[tf.newaxis, :]
 
   imgMap = None
-  if os.path.exists(filename):
+  if os.path.exists(mapname):
     imgMap = tf.io.read_file(mapname)
     imgMap = tf.image.decode_image(img,channels=3)
     imgMap = tf.image.convert_image_dtype(imgMap,tf.float64)
