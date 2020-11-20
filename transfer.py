@@ -25,10 +25,10 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=100.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=10.0, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--semantic-weight', default=100.0, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -106,6 +106,7 @@ def load_img(path_to_img):
 
   imgMap = None
   if os.path.exists(mapname):
+    tf.print("mapname:",mapname)
     imgMap = tf.io.read_file(mapname)
     imgMap = tf.image.decode_image(imgMap,channels=3)
     imgMap = tf.image.convert_image_dtype(imgMap,tf.float64)
@@ -358,19 +359,34 @@ def crop_quarters(feature_tensor):
     return feature_tensor
 
 
-def CX_loss_helper(T_features,T_map_features, I_features,I_map_features,nnsigma=float(0.5)):
+def CX_loss_helper(T_features,I_features,nnsigma=float(0.5),T_map_features=None,I_map_features=None):
     # if CX_config.crop_quarters is True:
     #     T_features = crop_quarters(T_features)
     #     I_features = crop_quarters(I_features)
-    targetFeatures = tf.concat(1,[T_features,T_map_features])
-    inputFeatures = tf.concat(1,[I_features,I_map_features])
-    N, fH, fW, fC = targetFeatures.shape.as_list()
+    # if T_map_features is not None and I_map_features is not None :
+    #     T_features = tf.concat([T_features,T_map_features],3)
+    #     I_features = tf.concat([I_features,I_map_features],3)
+
+    N, fH, fW, fC = T_features.shape.as_list()
     if fH * fW <= 65 ** 2:
         print(' #### Skipping pooling for CX....')
     else:
-        targetFeatures, inputFeatures = random_pooling(targetFeatures, inputFeatures, output_1d_size=65)
+        T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
+        if T_map_features is not None and I_map_features is not None:
+            T_map_features, I_map_features = random_pooling(T_map_features, I_map_features, output_1d_size=65)
+    # tf.print("befor,tshape:",tf.shape(T_features))
+    # tf.print("befor,Ishape:",tf.shape(I_features))
+    if T_map_features is not None and I_map_features is not None:
+        # tf.print("befor T_map_features",T_map_features)
+        T_map_features = tf.math.multiply(T_map_features,args.semantic_weight)
+        I_map_features = tf.math.multiply(I_map_features,args.semantic_weight)
+        # tf.print(" after T_map_features",T_map_features)
+        T_features = tf.concat([T_features,T_map_features],3)
+        I_features = tf.concat([I_features,I_map_features],3)
+    # tf.print("after,tshape:",tf.shape(T_features))
+    # tf.print("after,Ishape:",tf.shape(I_features))
 
-    loss = CX_loss(targetFeatures, inputFeatures,nnsigma)
+    loss = CX_loss(T_features, I_features,nnsigma)
     print("LOSS:{}".format(loss))
     return loss
 
@@ -427,20 +443,21 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
     # style_loss = tf.add_n([tf.reduce_mean((style_outputs[name]-style_targets[name])**2) 
     #                        for name in style_outputs.keys()])
 
-    tf.print("num_style_layers:",num_style_layers)
+    # tf.print("num_style_layers:",num_style_layers)
     #有待改进，重复
-    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_map_targets[name],style_outputs[name],current_map_targets[name],float(0.2)) for name in style_outputs.keys()])
+    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.2),style_map_targets[name],current_map_targets[name]) for name in style_outputs.keys()])
     style_loss *= args.style_weight / num_style_layers
 
     tf.print("style_loss:",style_loss)
     # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
                              # for name in content_outputs.keys()])
 
+
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
     content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
     content_loss *= args.content_weight / num_content_layers
-    # tf.print("content_loss:",content_loss)
+    tf.print("content_loss:",content_loss)
 
     # sem_loss = 0.0
     # if style_map_targets is not None and current_map_targets is not None:
@@ -465,17 +482,17 @@ def run(content_path,style_path):
     style_map_targets = None
     current_map_targets = None
     if style_map is not None and content_map is not None:
-        style_map_targets = extractor(style_map)['style']
-        current_map_targets = extractor(content_map)['style']
+        # style_map_targets = extractor(style_map)['style']
+        # current_map_targets = extractor(content_map)['style']
 
     # results = extractor(tf.constant(content_image))
     # style_results = results['style']
 
-    outputSize=args.output_size.split(",")
-    outputImage_height= outputSize[0]
-    outputImage_wight = outputSize[1]
+    # outputSize=args.output_size.split(",")
+    # outputImage_height= outputSize[0]
+    # outputImage_wight = outputSize[1]
 
-    # image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    # image = tf.compat.v1.get_variable("outputImage",shape=([1,content_image.shape[1],content_image.shape[2],3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
     image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
