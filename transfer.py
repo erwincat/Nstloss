@@ -25,10 +25,10 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=100.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=750000.0, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--semantic-weight', default=1000000.0, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -512,8 +512,8 @@ def run(content_path,style_path):
 
     start = time.time()
 
-    epochs = 100
-    steps_per_epoch = 10
+    epochs = 10
+    steps_per_epoch = 100
 
     step = 0
     for n in range(epochs):
