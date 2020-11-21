@@ -25,10 +25,10 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=100.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=100.0, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--semantic-weight', default=750000.0, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -45,25 +45,7 @@ add_arg('--save-every',     default=10, type=int,           help='How frequently
 args = parser.parse_args()
 #---------------------------------------------------------------------------------------------------------------------
 
-#---------------------------------------------------------------------------------------------------------------------
-#logging
-#---------------------------------------------------------------------------------------------------------------------
-logger = logging.getLogger("tensorflow")
-logger.setLevel(logging.INFO)
-# ch = logging.StreamHandler()
-# ch.setLevel(logging.DEBUG)
 
-rq = time.strftime('%Y%m%d%H%M', time.localtime(time.time()))
-# log_path = os.path.dirname(os.getcwd()) + '/Logs/'
-# log_name = log_path + rq + '.log'
-logfile = rq + ".log"
-fh = logging.FileHandler(logfile, mode='w')
-fh.setLevel(logging.DEBUG)  # 输出到file的log等级的开关
-formatter = logging.Formatter("%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s")
-fh.setFormatter(formatter)
-# ch.setFormatter(formatter)
-logger.addHandler(fh)
-# logger.addHandler(ch)
 
 
 #---------------------------------------------------------------------------------------------------------------------
@@ -381,6 +363,8 @@ def CX_loss_helper(T_features,I_features,nnsigma=float(0.5),T_map_features=None,
         T_map_features = tf.math.multiply(T_map_features,args.semantic_weight)
         I_map_features = tf.math.multiply(I_map_features,args.semantic_weight)
         # tf.print(" after T_map_features",T_map_features)
+        T_map_features = tf.cast(T_map_features, dtype=tf.float32)
+        I_map_features = tf.cast(I_map_features, dtype=tf.float32)
         T_features = tf.concat([T_features,T_map_features],3)
         I_features = tf.concat([I_features,I_map_features],3)
     # tf.print("after,tshape:",tf.shape(T_features))
@@ -460,7 +444,7 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
     tf.print("content_loss:",content_loss)
 
     # sem_loss = 0.0
-    # if style_map_targets is not None and current_map_targets is not None:
+    # if style_map_targets is not None and current_map_targets is not None:git 
     #     sem_loss = tf.add_n([CX_loss_helper(style_map_targets[name],current_map_targets[name],float(0.2)) for name in style_outputs.keys()])
     #     sem_loss *= args.semantic_weight / num_style_layers
 
@@ -469,7 +453,16 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
 
 
 
-
+def poolSemanticMap(map):
+    style_layers = args.style_layers.split(",")
+    semLayers = {}
+    for layer in style_layers:
+        block = layer.split("_")[0]
+        block_num = block[5]
+        size = int(block_num) -1
+        semmap = tf.nn.avg_pool(map,[1,2**size,2**size,1],[1,2**size,2**size,1],padding='SAME')
+        semLayers[layer] = semmap
+    return semLayers
 
 
 def run(content_path,style_path):
@@ -482,8 +475,29 @@ def run(content_path,style_path):
     style_map_targets = None
     current_map_targets = None
     if style_map is not None and content_map is not None:
-        # style_map_targets = extractor(style_map)['style']
-        # current_map_targets = extractor(content_map)['style']
+        style_map_targets = poolSemanticMap(style_map)
+        current_map_targets = poolSemanticMap(content_map)
+
+    tf.print("style_map_targets")
+    for name in style_map_targets.keys():
+        tf.print(name)
+        tf.print(tf.shape(style_map_targets[name]))
+
+    tf.print("current_map_targets")
+    for name in current_map_targets.keys():
+        tf.print(name)
+        tf.print(tf.shape(current_map_targets[name]))
+
+    tf.print("style_targets")
+    for name in style_targets.keys():
+        tf.print(name)
+        tf.print(tf.shape(style_targets[name]))
+
+    tf.print("content_targets")
+    for name in content_targets.keys():
+        tf.print(name)
+        tf.print(tf.shape(content_targets[name]))
+
 
     # results = extractor(tf.constant(content_image))
     # style_results = results['style']
@@ -498,8 +512,8 @@ def run(content_path,style_path):
 
     start = time.time()
 
-    epochs = 10
-    steps_per_epoch = 100
+    epochs = 100
+    steps_per_epoch = 10
 
     step = 0
     for n in range(epochs):
