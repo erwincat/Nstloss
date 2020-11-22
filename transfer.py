@@ -22,10 +22,10 @@ parser = argparse.ArgumentParser(description='Generate a new image by applying s
 add_arg = parser.add_argument
 
 add_arg('--content',        default=None, type=str,         help='Content image path as optimization target.')
-add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
+add_arg('--content-weight', default=10, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=30.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
 add_arg('--semantic-weight', default=10.0, type=float,      help='Global weight of semantics vs. features.')
@@ -45,25 +45,7 @@ add_arg('--save-every',     default=10, type=int,           help='How frequently
 args = parser.parse_args()
 #---------------------------------------------------------------------------------------------------------------------
 
-#---------------------------------------------------------------------------------------------------------------------
-#logging
-#---------------------------------------------------------------------------------------------------------------------
-logger = logging.getLogger("tensorflow")
-logger.setLevel(logging.INFO)
-# ch = logging.StreamHandler()
-# ch.setLevel(logging.DEBUG)
 
-rq = time.strftime('%Y%m%d%H%M', time.localtime(time.time()))
-# log_path = os.path.dirname(os.getcwd()) + '/Logs/'
-# log_name = log_path + rq + '.log'
-logfile = rq + ".log"
-fh = logging.FileHandler(logfile, mode='w')
-fh.setLevel(logging.DEBUG)  # 输出到file的log等级的开关
-formatter = logging.Formatter("%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s")
-fh.setFormatter(formatter)
-# ch.setFormatter(formatter)
-logger.addHandler(fh)
-# logger.addHandler(ch)
 
 
 #---------------------------------------------------------------------------------------------------------------------
@@ -450,7 +432,9 @@ def run(content_path,style_path):
     outputImage_height= outputSize[0]
     outputImage_wight = outputSize[1]
 
-    # image = tf.compat.v1.get_variable("outputImage",shape=([1,outputImage_height,outputImage_wight,3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    # image = tf.compat.v1.get_variable("outputImage",shape=([1,content_image.shape[1],content_image.shape[2],3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+
+    # image = tf.image.resize(image,[content_image.shape[1],content_image.shape[2]])
     image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
