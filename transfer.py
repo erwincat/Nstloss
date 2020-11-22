@@ -13,6 +13,7 @@ import functools
 import argparse
 import logging
 import os.path
+import math
 
 
 
@@ -22,13 +23,13 @@ parser = argparse.ArgumentParser(description='Generate a new image by applying s
 add_arg = parser.add_argument
 
 add_arg('--content',        default=None, type=str,         help='Content image path as optimization target.')
-add_arg('--content-weight', default=0.0001, type=float,       help='Weight of content relative to style.')
+add_arg('--content-weight', default=10, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=50.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=500000.0, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--semantic-weight', default=3, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -159,15 +160,36 @@ class CSFlow:
 
     #-- 计算输入图和目标图特征的相关性，计算了CXij的集合
     @staticmethod
-    def create_using_dotP(I_features, T_features, sigma = float(1.0), b = float(1.0)):
+    def create_using_dotP(I_features, T_features,T_map_features,I_map_features, sigma = float(1.0), b = float(1.0)):
         cs_flow = CSFlow(sigma, b)
         with tf.name_scope('CS'):
             # prepare feature before calculating cosine distance
             T_features, I_features = cs_flow.center_by_T(T_features, I_features)
             with tf.name_scope('TFeatures'):
                 T_features = CSFlow.l2_normalize_channelwise(T_features)
+                
             with tf.name_scope('IFeatures'):
                 I_features = CSFlow.l2_normalize_channelwise(I_features)
+                
+
+
+                if T_map_features is not None and I_map_features is not None:
+                    T_map_features = CSFlow.l2_normalize_channelwise(T_map_features)
+                    I_map_features = CSFlow.l2_normalize_channelwise(I_map_features)
+
+
+
+                    T_map_features = tf.math.multiply(T_map_features,math.sqrt(args.semantic_weight))
+                    I_map_features = tf.math.multiply(I_map_features,math.sqrt(args.semantic_weight))
+                    # tf.print(" after T_map_features",T_map_features)
+                    T_map_features = tf.cast(T_map_features, dtype=tf.float32)
+                    I_map_features = tf.cast(I_map_features, dtype=tf.float32)
+                    T_features = tf.concat([T_features,T_map_features],3)
+                    I_features = tf.concat([I_features,I_map_features],3)
+
+
+                tf.print("T_features norm:",tf.shape(T_features))
+                tf.print("I_features norm:",tf.shape(I_features))
                 # work seperatly for each example in dim 1
                 cosine_dist_l = []
                 N, _, __, ___ = T_features.shape.as_list()
@@ -266,12 +288,12 @@ class CSFlow:
 #--------------------------------------------------
 
 
-def CX_loss(T_features, I_features, nnsigma=float(1.0)):
+def CX_loss(T_features, I_features,T_map_features,I_map_features, nnsigma=float(1.0)):
     T_features = tf.convert_to_tensor(T_features, dtype=tf.float32)
     I_features = tf.convert_to_tensor(I_features, dtype=tf.float32)
 
     with tf.name_scope('CX'):
-        cs_flow = CSFlow.create_using_dotP(I_features, T_features, nnsigma, float(1.0))
+        cs_flow = CSFlow.create_using_dotP(I_features, T_features,T_map_features,I_map_features, nnsigma, float(1.0))
         # sum_normalize:
         height_width_axis = [1, 2]
         # To:
@@ -349,6 +371,7 @@ def CX_loss_helper(T_features,I_features,nnsigma=float(0.5),T_map_features=None,
     #     T_features = tf.concat([T_features,T_map_features],3)
     #     I_features = tf.concat([I_features,I_map_features],3)
 
+
     N, fH, fW, fC = T_features.shape.as_list()
     if fH * fW <= 65 ** 2:
         print(' #### Skipping pooling for CX....')
@@ -356,21 +379,26 @@ def CX_loss_helper(T_features,I_features,nnsigma=float(0.5),T_map_features=None,
         T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
         if T_map_features is not None and I_map_features is not None:
             T_map_features, I_map_features = random_pooling(T_map_features, I_map_features, output_1d_size=65)
+
+
+    # if T_map_features is not None and I_map_features is not None:
+    #     # tf.print("befor T_map_features",T_map_features)
+    #     T_map_features = tf.math.multiply(T_map_features,args.semantic_weight)
+    #     I_map_features = tf.math.multiply(I_map_features,args.semantic_weight)
+    #     # tf.print(" after T_map_features",T_map_features)
+    #     T_map_features = tf.cast(T_map_features, dtype=tf.float32)
+    #     I_map_features = tf.cast(I_map_features, dtype=tf.float32)
+    #     T_features = tf.concat([T_features,T_map_features],3)
+    #     I_features = tf.concat([I_features,I_map_features],3)
     # tf.print("befor,tshape:",tf.shape(T_features))
     # tf.print("befor,Ishape:",tf.shape(I_features))
-    if T_map_features is not None and I_map_features is not None:
-        # tf.print("befor T_map_features",T_map_features)
-        T_map_features = tf.math.multiply(T_map_features,args.semantic_weight)
-        I_map_features = tf.math.multiply(I_map_features,args.semantic_weight)
-        # tf.print(" after T_map_features",T_map_features)
-        T_map_features = tf.cast(T_map_features, dtype=tf.float32)
-        I_map_features = tf.cast(I_map_features, dtype=tf.float32)
-        T_features = tf.concat([T_features,T_map_features],3)
-        I_features = tf.concat([I_features,I_map_features],3)
+
+
+
     # tf.print("after,tshape:",tf.shape(T_features))
     # tf.print("after,Ishape:",tf.shape(I_features))
 
-    loss = CX_loss(T_features, I_features,nnsigma)
+    loss = CX_loss(T_features, I_features,T_map_features,I_map_features,nnsigma)
     print("LOSS:{}".format(loss))
     return loss
 
@@ -433,13 +461,13 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
     style_loss *= args.style_weight / num_style_layers
 
     tf.print("style_loss:",style_loss)
-    content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
-                             for name in content_outputs.keys()])
+    # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
+    #                          for name in content_outputs.keys()])
 
 
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
-    # content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
+    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
     content_loss *= args.content_weight / num_content_layers
     tf.print("content_loss:",content_loss)
 
@@ -506,8 +534,8 @@ def run(content_path,style_path):
     # outputImage_height= outputSize[0]
     # outputImage_wight = outputSize[1]
 
-    image = tf.compat.v1.get_variable("outputImage",shape=([1,content_image.shape[1],content_image.shape[2],3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
-    # image = tf.Variable(content_image)
+    # image = tf.compat.v1.get_variable("outputImage",shape=([1,content_image.shape[1],content_image.shape[2],3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
