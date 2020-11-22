@@ -22,13 +22,13 @@ parser = argparse.ArgumentParser(description='Generate a new image by applying s
 add_arg = parser.add_argument
 
 add_arg('--content',        default=None, type=str,         help='Content image path as optimization target.')
-add_arg('--content-weight', default=10.0, type=float,       help='Weight of content relative to style.')
+add_arg('--content-weight', default=0.0001, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=100.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=50.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=1000000.0, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--semantic-weight', default=500000.0, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -433,13 +433,13 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
     style_loss *= args.style_weight / num_style_layers
 
     tf.print("style_loss:",style_loss)
-    # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
-                             # for name in content_outputs.keys()])
+    content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
+                             for name in content_outputs.keys()])
 
 
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
-    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
+    # content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
     content_loss *= args.content_weight / num_content_layers
     tf.print("content_loss:",content_loss)
 
@@ -506,8 +506,8 @@ def run(content_path,style_path):
     # outputImage_height= outputSize[0]
     # outputImage_wight = outputSize[1]
 
-    # image = tf.compat.v1.get_variable("outputImage",shape=([1,content_image.shape[1],content_image.shape[2],3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
-    image = tf.Variable(content_image)
+    image = tf.compat.v1.get_variable("outputImage",shape=([1,content_image.shape[1],content_image.shape[2],3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    # image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
