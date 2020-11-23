@@ -197,9 +197,18 @@ class CSFlow:
                 for i in range(N):
                     T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
                     I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
-                    patches_HWCN_i = cs_flow.patch_decomposition(T_features_i)
-                    cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
-                                                        padding='VALID', name='cosine_dist')
+
+                    #--------------------------------------------------------------------------------
+                    # patches_HWCN_i = cs_flow.patch_decomposition(T_features_i)
+
+                    # cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
+                    #                                     padding='VALID', name='cosine_dist')
+                    TDI_features = tf.math.multiply(T_features_i,I_features_i)
+
+
+
+
+                    #--------------------------------------------------------------------------------
                     cosine_dist_l.append(cosine_dist_i)
                 cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
 
