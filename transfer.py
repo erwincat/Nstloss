@@ -199,11 +199,13 @@ class CSFlow:
                     I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
 
                     #--------------------------------------------------------------------------------
-                    # patches_HWCN_i = cs_flow.patch_decomposition(T_features_i)
+                    patches_NHWC_i = cs_flow.patch_decomposition(T_features_i)
 
                     # cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
                     #                                     padding='VALID', name='cosine_dist')
-                    TDI_features = tf.math.multiply(T_features_i,I_features_i)
+                    patches_N , _, _, _  = patches_NHWC_i.shape.as_list()
+                    for j in range(patches_N):
+                        TDI_features = tf.math.multiply(T_features_i,I_features_i)
 
 
 
@@ -287,17 +289,17 @@ class CSFlow:
             strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
             name='patches_as_depth_vectors')
 
-        self.patches_NHWC = tf.reshape(
-            patches_as_depth_vectors,
-            shape=[-1, patch_size, patch_size, patches_as_depth_vectors.shape[3]],
-            name='patches_PHWC')
+        # self.patches_NHWC = tf.reshape(
+        #     patches_as_depth_vectors,
+        #     shape=[-1, patch_size, patch_size, patches_as_depth_vectors.shape[3]],
+        #     name='patches_PHWC')
 
-        self.patches_HWCN = tf.transpose(
-            self.patches_NHWC,
-            perm=[1, 2, 3, 0],
-            name='patches_HWCP')  # tf.conv2 ready format
+        # self.patches_HWCN = tf.transpose(
+        #     self.patches_NHWC,
+        #     perm=[1, 2, 3, 0],
+        #     name='patches_HWCP')  # tf.conv2 ready format
 
-        return self.patches_HWCN
+        return patches_as_depth_vectors
 
 
 #--------------------------------------------------
