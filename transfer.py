@@ -26,10 +26,17 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
+<<<<<<< HEAD
 add_arg('--style-weight',   default=35.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
 add_arg('--semantic-weight', default=1.15, type=float,      help='Global weight of semantics vs. features.')
+=======
+add_arg('--style-weight',   default=150.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
+add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
+add_arg('--semantic-weight', default=1.5, type=float,      help='Global weight of semantics vs. features.')
+>>>>>>> ce5a2cd4d595cfac378e47aac141909d8b8d21ef
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -84,7 +91,7 @@ def load_img(path_to_img):
   max_dim = 512
   img = tf.io.read_file(path_to_img)
   img = tf.image.decode_image(img, channels=3)
-  img = tf.image.convert_image_dtype(img, tf.float64)
+  img = tf.image.convert_image_dtype(img, tf.float32)
   img = img[tf.newaxis, :]
 
   imgMap = None
@@ -92,7 +99,7 @@ def load_img(path_to_img):
     tf.print("mapname:",mapname)
     imgMap = tf.io.read_file(mapname)
     imgMap = tf.image.decode_image(imgMap,channels=3)
-    imgMap = tf.image.convert_image_dtype(imgMap,tf.float64)
+    imgMap = tf.image.convert_image_dtype(imgMap,tf.float32)
 
   # shape = tf.cast(tf.shape(img)[:-1], tf.float64)
   # long_dim = max(shape)
@@ -174,13 +181,14 @@ class CSFlow:
 
 
                 if T_map_features is not None and I_map_features is not None:
-                    T_map_features = CSFlow.l2_normalize_channelwise(T_map_features)
-                    I_map_features = CSFlow.l2_normalize_channelwise(I_map_features)
+                    T_map_features = CSFlow.l2_normalize_channelwise(T_map_features,3)
+                    I_map_features = CSFlow.l2_normalize_channelwise(I_map_features,3)
 
 
 
-                    T_map_features = tf.math.multiply(T_map_features,math.sqrt(args.semantic_weight))
-                    I_map_features = tf.math.multiply(I_map_features,math.sqrt(args.semantic_weight))
+                    # tf.print(" befor T_map_features",T_map_features)
+                    T_map_features = tf.math.multiply(T_map_features,args.semantic_weight)
+                    I_map_features = tf.math.multiply(I_map_features,args.semantic_weight)
                     # tf.print(" after T_map_features",T_map_features)
                     T_map_features = tf.cast(T_map_features, dtype=tf.float32)
                     I_map_features = tf.cast(I_map_features, dtype=tf.float32)
@@ -202,7 +210,14 @@ class CSFlow:
                     cosine_dist_l.append(cosine_dist_i)
                 cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
 
-                cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1) / 2
+                # cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1) / 2
+
+                if T_map_features is not None and I_map_features is not None:
+                #加语义图后，余弦相关性变为（-2，2），将其修正为（0，1）
+                    cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1 - args.semantic_weight ** 2) / ( 2 * (args.semantic_weight + 1) )
+                else :
+                    cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1 ) / 2 
+
                 cs_flow.raw_distances = cosine_dist_zero_to_one
 
                 relative_dist = cs_flow.calc_relative_distances()
@@ -254,11 +269,11 @@ class CSFlow:
         return self.T_features_centered, self.I_features_centered
     @staticmethod
 
-    def l2_normalize_channelwise(features):
+    def l2_normalize_channelwise(features,num = 1.0):
         norms = tf.norm(features, ord='euclidean', axis=3, name='norm')
         # expanding the norms tensor to support broadcast division
         norms_expanded = tf.expand_dims(norms, 3)
-        features = tf.divide(features, norms_expanded, name='normalized')
+        features = tf.math.divide_no_nan(features, norms_expanded * num, name='normalized')
         return features
 
     def patch_decomposition(self, T_features):
@@ -303,7 +318,7 @@ def CX_loss(T_features, I_features,T_map_features,I_map_features, nnsigma=float(
         CX_as_loss = 1 - CS
         CX_loss = -tf.math.log(1 - CX_as_loss)
         CX_loss = tf.math.reduce_mean(CX_loss) #返回损失值，一个float32
-        print("CXLOSS：{}".format(float(CX_loss)))
+        # print("CXLOSS：{}".format(float(CX_loss)))
         return CX_loss
 
 #--------------------------------------------------
@@ -399,7 +414,7 @@ def CX_loss_helper(T_features,I_features,nnsigma=float(0.5),T_map_features=None,
     # tf.print("after,Ishape:",tf.shape(I_features))
 
     loss = CX_loss(T_features, I_features,T_map_features,I_map_features,nnsigma)
-    print("LOSS:{}".format(loss))
+    # tf.print("LOSS:",loss)
     return loss
 
 #------------------------------------------------------------
@@ -526,6 +541,7 @@ def run(content_path,style_path):
         tf.print(name)
         tf.print(tf.shape(content_targets[name]))
 
+    # args.semantic_weight = math.sqrt(args.semantic_weight) if args.semantic_weight else 0.0
 
     # results = extractor(tf.constant(content_image))
     # style_results = results['style']
@@ -561,12 +577,14 @@ def run(content_path,style_path):
 
 @tf.function()
 def train_step(image,extractor,style_targets,style_map_targets,content_targets,current_map_targets,opt):
+    
     with tf.GradientTape() as tape:
         outputs = extractor(image)
         loss = style_content_loss(outputs,style_targets,style_map_targets,content_targets,current_map_targets)
+        # loss += args.smoothness*tf.image.total_variation(image)
 
     # tf.compat.v1.logging.info("loss:%f",float(loss))
-    tf.print("loss:",loss)
+    tf.print("\033[1;32mThis function Total loss:\033[0m",loss)
     grad = tape.gradient(loss, image)
     # print("grad:{}".format(grad))
     opt.apply_gradients([(grad, image)])
