@@ -26,17 +26,10 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-<<<<<<< HEAD
-add_arg('--style-weight',   default=30.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=35.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=1000.0, type=float,      help='Global weight of semantics vs. features.')
-=======
-add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
-add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
-add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=3, type=float,      help='Global weight of semantics vs. features.')
->>>>>>> da9be7ba5055bdf25f3d25e3b9d034f3c6174270
+add_arg('--semantic-weight', default=1.15, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -195,8 +188,8 @@ class CSFlow:
                     I_features = tf.concat([I_features,I_map_features],3)
 
 
-                tf.print("T_features norm:",tf.shape(T_features))
-                tf.print("I_features norm:",tf.shape(I_features))
+                # tf.print("T_features norm:",tf.shape(T_features))
+                # tf.print("I_features norm:",tf.shape(I_features))
                 # work seperatly for each example in dim 1
                 cosine_dist_l = []
                 N, _, __, ___ = T_features.shape.as_list()
