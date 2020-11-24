@@ -26,10 +26,10 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=150.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
-add_arg('--semantic-weight', default=1.5, type=float,      help='Global weight of semantics vs. features.')
+add_arg('--semantic-weight', default=5, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
 add_arg('--output-size',    default='512,512', type=str,         help='Size of the output image, e.g. 512x512.')
 add_arg('--phases',         default=3, type=int,            help='Number of image scales to process in phases.')
@@ -145,17 +145,16 @@ class CSFlow:
         self.sigma = sigma #sigma 是变量h
 
     def __calculate_CS(self, scaled_distances, axis_for_normalization = 3):
-        self.scaled_distances = scaled_distances #修正后的余弦距离
-        self.cs_weights_before_normalization = tf.exp((self.b - scaled_distances) / self.sigma, name='weights_before_normalization') #权重
-        self.cs_NHWC = CSFlow.sum_normalize(self.cs_weights_before_normalization, axis_for_normalization)#CXij 集合
+        cs_weights_before_normalization = tf.exp((self.b - scaled_distances) / self.sigma, name='weights_before_normalization') #权重
+        return CSFlow.sum_normalize(cs_weights_before_normalization, axis_for_normalization)#CXij 集合
 
-    def reversed_direction_CS(self):
-        cs_flow_opposite = CSFlow(self.sigma, self.b)
-        cs_flow_opposite.raw_distances = self.raw_distances
-        work_axis = [1, 2]
-        relative_dist = cs_flow_opposite.calc_relative_distances(axis=work_axis)
-        cs_flow_opposite.__calculate_CS(relative_dist, work_axis)
-        return cs_flow_opposite
+    # def reversed_direction_CS(self):
+    #     cs_flow_opposite = CSFlow(self.sigma, self.b)
+    #     cs_flow_opposite.raw_distances = self.raw_distances
+    #     work_axis = [1, 2]
+    #     relative_dist = cs_flow_opposite.calc_relative_distances(axis=work_axis)
+    #     cs_flow_opposite.__calculate_CS(relative_dist, work_axis)
+    #     return cs_flow_opposite
 
 
     #-- 计算输入图和目标图特征的相关性，计算了CXij的集合
@@ -171,7 +170,20 @@ class CSFlow:
             with tf.name_scope('IFeatures'):
                 I_features = CSFlow.l2_normalize_channelwise(I_features)
                 
+                cosine_dist_l = []
+                N, _, __, ___ = T_features.shape.as_list()
+                for i in range(N):
+                    T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
+                    I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
 
+                    #--------------------------------------------------------------------------------
+                    patches_HWCN_i = cs_flow.patch_decomposition(T_features_i)
+
+                    cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
+                                                        padding='VALID', name='cosine_dist')
+                    cosine_dist_l.append(cosine_dist_i)
+                cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
+                # tf.print("cosine_dist shape:",tf.shape(cosine_dist))
 
                 if T_map_features is not None and I_map_features is not None:
                     T_map_features = CSFlow.l2_normalize_channelwise(T_map_features,3)
@@ -188,85 +200,152 @@ class CSFlow:
                     T_features = tf.concat([T_features,T_map_features],3)
                     I_features = tf.concat([I_features,I_map_features],3)
 
-                    cosine_dist_l = []
+                    sem_cosine_dist_l = []
                     N, _, __, ___ = T_features.shape.as_list()
                     for i in range(N):
-                        T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
-                        I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
+                        sem_T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
+                        sem_I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
 
                         #--------------------------------------------------------------------------------
-                        patches_list = cs_flow.patch_decomposition(T_features_i)
+                        sem_patches_HWCN_i = cs_flow.patch_decomposition(sem_T_features_i)
 
-                        # cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
-                        #                                     padding='VALID', name='cosine_dist')
-                        patches_N , _  = patches_list.shape.as_list()
+                        sem_cosine_dist_i = tf.nn.conv2d(sem_I_features_i, sem_patches_HWCN_i, strides=[1, 1, 1, 1],
+                                                            padding='VALID', name='cosine_dist')
+                        sem_cosine_dist_l.append(sem_cosine_dist_i)
+                    sem_cosine_dist = tf.concat(sem_cosine_dist_l, axis = 0)
+                    # tf.print("sem_cosine_dist shape:",tf.shape(sem_cosine_dist))
+                    # cosine_dist = tf.expand_dims(cosine_dist, 4)
+                    # sem_cosine_dist = tf.expand_dims(sem_cosine_dist, 4)
 
-                        # x=tf.constant([[1.0,5.0,3.0],[4.0,2.0,6.0],[7.0,8.0,9.0]]) 
-                        # tf.print("x shape:",tf.shape(x))
-                        # tf.print("x min:",tf.math.reduce_min(x,axis=1,keepdims = True))
+                    # cs_flow.cosine_dist = tf.concat([sem_cosine_dist,cosine_dist],axis = 4)
+                    cs_flow.sem_cosine_dist = sem_cosine_dist
 
-                        ReTotal_i = []
-                        for j in range(patches_N):
-                            # tf.print("befor I_features_i:",I_features_i)
-                            TDI_features = tf.math.multiply(I_features_i,patches_list[j,:])
-                            semRe = tf.reduce_sum(TDI_features , 3, keepdims = True) #包含语义图部分的点积结果
-
-                            N,H,W,C = TDI_features.shape.as_list()
-                            slice_TDI_features = tf.slice(TDI_features,[0,0,0,0],[N,H,W,C-3])
-                            # tf.print("semRe:",tf.shape(semRe))
-                            nosemRe = tf.reduce_sum(slice_TDI_features , 3, keepdims = True) #不包含语义图的点积结果
-
-                            ReTotal_j = tf.concat([semRe,nosemRe],3)
-                            # tf.print("ReTotal_j:",tf.shape(ReTotal_j))
-                            ReTotal_j = tf.expand_dims(ReTotal_j,3)
-                            ReTotal_i.append(ReTotal_j)
-
-                        # tf.print("ReTotal_i:",tf.shape(ReTotal_i))
-                        ReTotal = tf.concat(ReTotal_i,axis = 3)
-                        # tf.print("ReTotal:",tf.shape(ReTotal))
-                        target = tf.math.reduce_max(ReTotal,axis = 3)
-                        N,H,W,C = target.shape.as_list()
-                        target = tf.slice(target,[0,0,0,1],[N,H,W,1])
-
-                        cosine_dist_zero_to_one = (target + 1) / 2
+                    sem_cosine_dist_zero_to_one = -(cs_flow.sem_cosine_dist - 1 - args.semantic_weight ** 2) / ( 2 * (args.semantic_weight + 1) )
+                    cs_flow.sem_raw_distances = sem_cosine_dist_zero_to_one
+                    sem_relative_dist = cs_flow.calc_relative_distances(cs_flow.sem_raw_distances)
+                    cs_flow.sem_cs_NHWC = cs_flow.__calculate_CS(sem_relative_dist)
+                    # tf.print("cosine_dist shape:",tf.shape(cs_flow.cosine_dist))
 
 
-                # tf.print("T_features norm:",tf.shape(T_features))
-                # tf.print("I_features norm:",tf.shape(I_features))
-                # work seperatly for each example in dim 1
-                else :
-                    cosine_dist_l = []
-                    N, _, __, ___ = T_features.shape.as_list()
-                    for i in range(N):
-                        T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
-                        I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
+                    # cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
+                    
 
-                        #--------------------------------------------------------------------------------
-                        patches_list = cs_flow.patch_decomposition(T_features_i)
+                #     patches_N , _  = patches_list.shape.as_list()
 
-                        # cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
-                        #                                     padding='VALID', name='cosine_dist')
-                        patches_N , _  = patches_list.shape.as_list()
+                #     # x=tf.constant([[1.0,5.0,3.0],[4.0,2.0,6.0],[7.0,8.0,9.0]]) 
+                #     # tf.print("x shape:",tf.shape(x))
+                #     # tf.print("x min:",tf.math.reduce_min(x,axis=1,keepdims = True))
 
-                        # x=tf.constant([[1.0,5.0,3.0],[4.0,2.0,6.0],[7.0,8.0,9.0]]) 
-                        # tf.print("x shape:",tf.shape(x))
-                        # tf.print("x min:",tf.math.reduce_min(x,axis=1,keepdims = True))
+                #     ReTotal_i = []
+                #     for j in range(patches_N):
+                #         # tf.print("befor I_features_i:",I_features_i)
+                #         TDI_features = tf.math.multiply(I_features_i,patches_list[j,:])
+                #         semRe = tf.reduce_sum(TDI_features , 3, keepdims = True) #包含语义图部分的点积结果
 
-                        ReTotal_i = []
-                        for j in range(patches_N):
-                            # tf.print("befor I_features_i:",I_features_i)
-                            TDI_features = tf.math.multiply(I_features_i,patches_list[j,:])
-                            semRe = tf.reduce_sum(TDI_features , 3, keepdims = True) #包含语义图部分的点积结果
+                #         # tf.print("ReTotal_j:",tf.shape(ReTotal_j))
+                #         ReTotal_i.append(ReTotal_j)
 
-                            # tf.print("ReTotal_j:",tf.shape(ReTotal_j))
-                            ReTotal_i.append(ReTotal_j)
+                #     # tf.print("ReTotal_i:",tf.shape(ReTotal_i))
+                #     ReTotal = tf.concat(ReTotal_i,axis = 3)
+                #     # tf.print("ReTotal:",tf.shape(ReTotal))
+                #     target = tf.math.reduce_max(ReTotal,axis = 3,Keepdims = True)
 
-                        # tf.print("ReTotal_i:",tf.shape(ReTotal_i))
-                        ReTotal = tf.concat(ReTotal_i,axis = 3)
-                        # tf.print("ReTotal:",tf.shape(ReTotal))
-                        target = tf.math.reduce_max(ReTotal,axis = 3,Keepdims = True)
+                #     cosine_dist_zero_to_one = (target + 1) / 2
 
-                        cosine_dist_zero_to_one = (target + 1) / 2
+                # if T_map_features is not None and I_map_features is not None:
+                #     T_map_features = CSFlow.l2_normalize_channelwise(T_map_features,3)
+                #     I_map_features = CSFlow.l2_normalize_channelwise(I_map_features,3)
+
+
+
+                #     # tf.print(" befor T_map_features",T_map_features)
+                #     T_map_features = tf.math.multiply(T_map_features,args.semantic_weight)
+                #     I_map_features = tf.math.multiply(I_map_features,args.semantic_weight)
+                #     # tf.print(" after T_map_features",T_map_features)
+                #     T_map_features = tf.cast(T_map_features, dtype=tf.float32)
+                #     I_map_features = tf.cast(I_map_features, dtype=tf.float32)
+                #     T_features = tf.concat([T_features,T_map_features],3)
+                #     I_features = tf.concat([I_features,I_map_features],3)
+
+                #     cosine_dist_l = []
+                #     N, _, __, ___ = T_features.shape.as_list()
+                #     for i in range(N):
+                #         T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
+                #         I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
+
+                #         #--------------------------------------------------------------------------------
+                #         patches_list = cs_flow.patch_decomposition(T_features_i)
+
+                #         # cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
+                #         #                                     padding='VALID', name='cosine_dist')
+                #         patches_N , _  = patches_list.shape.as_list()
+
+                #         # x=tf.constant([[1.0,5.0,3.0],[4.0,2.0,6.0],[7.0,8.0,9.0]]) 
+                #         # tf.print("x shape:",tf.shape(x))
+                #         # tf.print("x min:",tf.math.reduce_min(x,axis=1,keepdims = True))
+
+                #         ReTotal_i = []
+                #         for j in range(patches_N):
+                #             # tf.print("befor I_features_i:",I_features_i)
+                #             TDI_features = tf.math.multiply(I_features_i,patches_list[j,:])
+                #             semRe = tf.reduce_sum(TDI_features , 3, keepdims = True) #包含语义图部分的点积结果
+
+                #             N,H,W,C = TDI_features.shape.as_list()
+                #             slice_TDI_features = tf.slice(TDI_features,[0,0,0,0],[N,H,W,C-3])
+                #             # tf.print("semRe:",tf.shape(semRe))
+                #             nosemRe = tf.reduce_sum(slice_TDI_features , 3, keepdims = True) #不包含语义图的点积结果
+
+                #             ReTotal_j = tf.concat([semRe,nosemRe],3)
+                #             # tf.print("ReTotal_j:",tf.shape(ReTotal_j))
+                #             ReTotal_j = tf.expand_dims(ReTotal_j,3)
+                #             ReTotal_i.append(ReTotal_j)
+
+                #         # tf.print("ReTotal_i:",tf.shape(ReTotal_i))
+                #         ReTotal = tf.concat(ReTotal_i,axis = 3)
+                #         # tf.print("ReTotal:",tf.shape(ReTotal))
+                #         target = tf.math.reduce_max(ReTotal,axis = 3)
+                #         N,H,W,C = target.shape.as_list()
+                #         target = tf.slice(target,[0,0,0,1],[N,H,W,1])
+
+                #         cosine_dist_zero_to_one = (target + 1) / 2
+
+
+                # # tf.print("T_features norm:",tf.shape(T_features))
+                # # tf.print("I_features norm:",tf.shape(I_features))
+                # # work seperatly for each example in dim 1
+                # else :
+                #     cosine_dist_l = []
+                #     N, _, __, ___ = T_features.shape.as_list()
+                #     for i in range(N):
+                #         T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
+                #         I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
+
+                #         #--------------------------------------------------------------------------------
+                #         patches_list = cs_flow.patch_decomposition(T_features_i)
+
+                #         # cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
+                #         #                                     padding='VALID', name='cosine_dist')
+                #         patches_N , _  = patches_list.shape.as_list()
+
+                #         # x=tf.constant([[1.0,5.0,3.0],[4.0,2.0,6.0],[7.0,8.0,9.0]]) 
+                #         # tf.print("x shape:",tf.shape(x))
+                #         # tf.print("x min:",tf.math.reduce_min(x,axis=1,keepdims = True))
+
+                #         ReTotal_i = []
+                #         for j in range(patches_N):
+                #             # tf.print("befor I_features_i:",I_features_i)
+                #             TDI_features = tf.math.multiply(I_features_i,patches_list[j,:])
+                #             semRe = tf.reduce_sum(TDI_features , 3, keepdims = True) #包含语义图部分的点积结果
+
+                #             # tf.print("ReTotal_j:",tf.shape(ReTotal_j))
+                #             ReTotal_i.append(ReTotal_j)
+
+                #         # tf.print("ReTotal_i:",tf.shape(ReTotal_i))
+                #         ReTotal = tf.concat(ReTotal_i,axis = 3)
+                #         # tf.print("ReTotal:",tf.shape(ReTotal))
+                #         target = tf.math.reduce_max(ReTotal,axis = 3,Keepdims = True)
+
+                #         cosine_dist_zero_to_one = (target + 1) / 2
 
 
 
@@ -274,7 +353,7 @@ class CSFlow:
                     #--------------------------------------------------------------------------------
                     # cosine_dist_l.append(cosine_dist_i)
                 # cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
-                cs_flow.cosine_dist = cosine_dist_zero_to_one
+                # cs_flow.cosine_dist = cosine_dist_zero_to_one
 
                 # B, H, W, C, _ = ReTotal.shape.as_list()  
                 # tf.print("ReTotal:",ReTotal)
@@ -290,23 +369,22 @@ class CSFlow:
                 # tf.print("cosine ReTotal:",ReTotal)
                 # cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1) / 2
 
-                # if T_map_features is not None and I_map_features is not None:
-                # #加语义图后，余弦相关性变为（-2，2），将其修正为（0，1）
-                #     cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1 - args.semantic_weight ** 2) / ( 2 * (args.semantic_weight + 1) )
-                # else :
-                #     cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1 ) / 2 
+                    
+                
+                cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1 ) / 2 
 
                 cs_flow.raw_distances = cosine_dist_zero_to_one
 
-                # relative_dist = cs_flow.calc_relative_distances()
-                # cs_flow.__calculate_CS(relative_dist)
+                relative_dist = cs_flow.calc_relative_distances(cs_flow.raw_distances)
+                cs_flow.cs_NHWC = cs_flow.__calculate_CS(relative_dist)
+                tf.print("cs_NHWC:",tf.shape(cs_flow.cs_NHWC))
                 return cs_flow
 
-    def calc_relative_distances(self, axis=3):
+    def calc_relative_distances(self,raw_distances, axis=3):
         epsilon = 1e-5
-        div = tf.math.reduce_min(self.raw_distances, axis=axis, keepdims=True)
+        div = tf.math.reduce_min(raw_distances, axis=axis, keepdims=True)
         # div = tf.reduce_mean(self.raw_distances, axis=axis, keep_dims=True)
-        relative_dist = self.raw_distances / (div + epsilon)
+        relative_dist = raw_distances / (div + epsilon)
         return relative_dist
 
     def weighted_average_dist(self, axis = 3):
@@ -363,17 +441,17 @@ class CSFlow:
             strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
             name='patches_as_depth_vectors')
 
-        patches_list = tf.reshape(
+        self.patches_NHWC = tf.reshape(
             patches_as_depth_vectors,
-            shape=[-1,patches_as_depth_vectors.shape[3]],
-            name='patches_list')
+            shape=[-1,patch_size,patch_size,patches_as_depth_vectors.shape[3]],
+            name='patches_PHWC')
 
-        # self.patches_HWCN = tf.transpose(
-        #     self.patches_NHWC,
-        #     perm=[1, 2, 3, 0],
-        #     name='patches_HWCP')  # tf.conv2 ready format
+        self.patches_HWCN = tf.transpose(
+            self.patches_NHWC,
+            perm=[1, 2, 3, 0],
+            name='patches_HWCP')  # tf.conv2 ready format
 
-        return patches_list
+        return self.patches_HWCN
 
 
 #--------------------------------------------------
@@ -390,12 +468,36 @@ def CX_loss(T_features, I_features,T_map_features,I_map_features, nnsigma=float(
         # sum_normalize:
         height_width_axis = [1, 2]
         # To:
-        cs = cs_flow.raw_distances
-        # k_max_NC = tf.math.reduce_max(cs, axis=height_width_axis) #找到CXij集合中最大的CXij
-        CS = tf.math.reduce_mean(cs) 
+        
+        if T_map_features is not None and I_map_features is not None: 
+            cs_NHWC = tf.expand_dims(cs_flow.cs_NHWC,axis = 4)
+            sem_cs_NHWC = tf.expand_dims(cs_flow.sem_cs_NHWC,axis = 4)
+            cs = tf.concat([sem_cs_NHWC,cs_NHWC],axis = 4)
+            k_max_NC = []
+            _,h,w,_,_ = cs.shape.as_list()
+            for i in range(h):
+                for j in range(w):
+                    CXij_list = cs[0,i,j,:,:]
+                    max = tf.argmax(CXij_list,axis = 0)[0]
+                    k_max_NC.append(CXij_list[max,1])
+        # tf.print("cs:",tf.shape(cs))
+        #
+
+        # x=[[[[[1.0,6.0],[2.0,4.0]],[[3.0,4.0],[7.0,2.0]]],[[[1.0,3.0],[4.0,6.0]],[[8.0,5.0],[1.0,10.0]]]]]
+        # x = [[1,2],[3,4],[0,5],[2,6]]
+        # tf.print("x shape:",tf.shape(x))
+        # print("x max:",tf.argmax(x,axis = 0))
+            k_max_NC = [k_max_NC]
+        else:
+            k_max_NC = tf.math.reduce_max(cs_flow.cs_NHWC, axis=height_width_axis) #找到CXij集合中最大的CXij
+
+
+        # tf.print("k_max_NC:",tf.shape(k_max_NC))
+        CS = tf.math.reduce_mean(k_max_NC,axis=[1]) 
+        # tf.print("CS:",tf.shape(CS))
         CX_as_loss = 1 - CS
         CX_loss = -tf.math.log(1 - CX_as_loss)
-        # CX_loss = tf.math.reduce_mean(CX_loss) #返回损失值，一个float32
+        CX_loss = tf.math.reduce_mean(CX_loss) #返回损失值，一个float32
         print("CXLOSS：{}".format(float(CX_loss)))
         return CX_loss
 
@@ -653,7 +755,7 @@ def run(content_path,style_path):
 
     tensor_to_image(image).save(args.output)
 
-# @tf.function()
+@tf.function()
 def train_step(image,extractor,style_targets,style_map_targets,content_targets,current_map_targets,opt):
     
     with tf.GradientTape() as tape:
