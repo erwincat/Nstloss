@@ -200,8 +200,10 @@ class CSFlow:
                     T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
                     I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
                     patches_HWCN_i = cs_flow.patch_decomposition(T_features_i)
+                    # tf.print("patches_HWCN_i:",tf.shape(patches_HWCN_i))
                     cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
                                                         padding='VALID', name='cosine_dist')
+                    # tf.print("cosine_sist:",tf.shape(cosine_dist_i))
                     cosine_dist_l.append(cosine_dist_i)
                 cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
 
@@ -280,11 +282,13 @@ class CSFlow:
             strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
             name='patches_as_depth_vectors')
 
+        # tf.print("patches shap:",tf.shape(patches_as_depth_vectors))
+
         self.patches_NHWC = tf.reshape(
             patches_as_depth_vectors,
             shape=[-1, patch_size, patch_size, patches_as_depth_vectors.shape[3]],
             name='patches_PHWC')
-
+        # tf.print("patches_NHWC shap:",tf.shape(self.patches_NHWC))
         self.patches_HWCN = tf.transpose(
             self.patches_NHWC,
             perm=[1, 2, 3, 0],
