@@ -26,7 +26,7 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=15, type=float,       help='Weight of style relative to content.')
+add_arg('--style-weight',   default=30, type=float,       help='Weight of style relative to content.')
 add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
 add_arg('--semantic-weight', default=10, type=float,      help='Global weight of semantics vs. features.')
@@ -144,9 +144,10 @@ class CSFlow:
         self.b = b
         self.sigma = sigma #sigma 是变量h
 
-    def __calculate_CS(self, scaled_distances, axis_for_normalization = 3):
+    def __calculate_CS(self, scaled_distances,temp = None, axis_for_normalization = 3):
         cs_weights_before_normalization = tf.exp((self.b - scaled_distances) / self.sigma, name='weights_before_normalization') #权重
-        return CSFlow.sum_normalize(cs_weights_before_normalization, axis_for_normalization)#CXij 集合
+
+        return CSFlow.sum_normalize(cs_weights_before_normalization, temp,axis_for_normalization)#CXij 集合
 
     # def reversed_direction_CS(self):
     #     cs_flow_opposite = CSFlow(self.sigma, self.b)
@@ -159,17 +160,42 @@ class CSFlow:
 
     #-- 计算输入图和目标图特征的相关性，计算了CXij的集合
     @staticmethod
-    def create_using_dotP(I_features, T_features,T_map_features,I_map_features, sigma = float(1.0), b = float(1.0)):
+    def create_using_dotP(I_features, T_features,isStyle ,sigma = float(1.0), b = float(1.0)):
         cs_flow = CSFlow(sigma, b)
         with tf.name_scope('CS'):
             # prepare feature before calculating cosine distance
             T_features, I_features = cs_flow.center_by_T(T_features, I_features)
+
             with tf.name_scope('TFeatures'):
-                T_features = CSFlow.l2_normalize_channelwise(T_features)
+                T_features = CSFlow.l2_normalize_channelwise(T_features,isStyle)
                 
             with tf.name_scope('IFeatures'):
-                I_features = CSFlow.l2_normalize_channelwise(I_features)
+                I_features = CSFlow.l2_normalize_channelwise(I_features,isStyle)
                 
+                if args.semantic_weight > 0 and isStyle:
+                    N, H, W, C = T_features.shape.as_list()
+                    T_map_features = T_features
+                    T_features = tf.slice(T_features,[0,0,0,0],[N, H, W,C-3])
+                    I_map_features = I_features
+                    I_features = tf.slice(I_features,[0,0,0,0],[N, H, W,C-3])
+
+                    sem_cosine_dist_l = []
+                    N, _, __, ___ = T_map_features.shape.as_list()
+                    for i in range(N):
+                        sem_T_features_i = tf.expand_dims(T_map_features[i, :, :, :], 0)
+                        sem_I_features_i = tf.expand_dims(I_map_features[i, :, :, :], 0)
+
+                        #--------------------------------------------------------------------------------
+                        sem_patches_HWCN_i = cs_flow.patch_decomposition(sem_T_features_i)
+
+                        sem_cosine_dist_i = tf.nn.conv2d(sem_I_features_i, sem_patches_HWCN_i, strides=[1, 1, 1, 1],
+                                                            padding='VALID', name='sem_cosine_dist')
+                        sem_cosine_dist_l.append(sem_cosine_dist_i)
+                    sem_cosine_dist = tf.concat(sem_cosine_dist_l, axis = 0)
+
+
+
+
                 cosine_dist_l = []
                 N, _, __, ___ = T_features.shape.as_list()
                 for i in range(N):
@@ -184,58 +210,32 @@ class CSFlow:
                     cosine_dist_l.append(cosine_dist_i)
                 cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
                 # tf.print("cosine_dist shape:",tf.shape(cosine_dist))
+
+                temp = None
+                if args.semantic_weight > 0 and isStyle:
+                    #temp 是语义图的余弦相似度矩阵
+                    temp = sem_cosine_dist - cs_flow.cosine_dist
+                    #temp 二值化 ------------
+                    temp = temp.numpy()
+                    temp = ( temp > 0.95 ).astype(np.int_)
+                    temp = tf.cast(temp,dtype = tf.float32)
+
+                    # tf.print("temp one zero:",tf.reduce_sum(temp,3))
+                    #-----------------------
+                    #将语义图标签不同的元素的余弦相似度设置为-1，变为最不相关
+                    cs_flow.cosine_dist = tf.math.multiply((cs_flow.cosine_dist + 1 ),temp) - 1
+
+
                 cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1 ) / 2 
 
                 cs_flow.raw_distances = cosine_dist_zero_to_one
 
                 relative_dist = cs_flow.calc_relative_distances(cs_flow.raw_distances)
-                cs_flow.cs_NHWC = cs_flow.__calculate_CS(relative_dist)
-
-                if T_map_features is not None and I_map_features is not None:
-                    T_map_features = CSFlow.l2_normalize_channelwise(T_map_features,3)
-                    I_map_features = CSFlow.l2_normalize_channelwise(I_map_features,3)
-
-
-
-                    # tf.print(" befor T_map_features",T_map_features)
-                    T_map_features = tf.math.multiply(T_map_features,args.semantic_weight)
-                    I_map_features = tf.math.multiply(I_map_features,args.semantic_weight)
-                    # tf.print(" after T_map_features",T_map_features)
-                    T_map_features = tf.cast(T_map_features, dtype=tf.float32)
-                    I_map_features = tf.cast(I_map_features, dtype=tf.float32)
-                    T_features = tf.concat([T_features,T_map_features],3)
-                    I_features = tf.concat([I_features,I_map_features],3)
-
-                    sem_cosine_dist_l = []
-                    N, _, __, ___ = T_features.shape.as_list()
-                    for i in range(N):
-                        sem_T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
-                        sem_I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
-
-                        #--------------------------------------------------------------------------------
-                        sem_patches_HWCN_i = cs_flow.patch_decomposition(sem_T_features_i)
-
-                        sem_cosine_dist_i = tf.nn.conv2d(sem_I_features_i, sem_patches_HWCN_i, strides=[1, 1, 1, 1],
-                                                            padding='VALID', name='cosine_dist')
-                        sem_cosine_dist_l.append(sem_cosine_dist_i)
-                    sem_cosine_dist = tf.concat(sem_cosine_dist_l, axis = 0)
-                    # tf.print("sem_cosine_dist shape:",tf.shape(sem_cosine_dist))
-                    # cosine_dist = tf.expand_dims(cosine_dist, 4)
-                    # sem_cosine_dist = tf.expand_dims(sem_cosine_dist, 4)
-
-                    # cs_flow.cosine_dist = tf.concat([sem_cosine_dist,cosine_dist],axis = 4)
-                    cs_flow.sem_cosine_dist = sem_cosine_dist
-
-                    sem_cosine_dist_zero_to_one = -(cs_flow.sem_cosine_dist - 1 - args.semantic_weight ** 2) / ( 2 * (args.semantic_weight + 1) )
-                    cs_flow.sem_raw_distances = sem_cosine_dist_zero_to_one
-                    sem_relative_dist = cs_flow.calc_relative_distances(cs_flow.sem_raw_distances)
-                    cs_flow.sem_cs_NHWC = cs_flow.__calculate_CS(sem_relative_dist)
-                    # tf.print("cosine_dist shape:",tf.shape(cs_flow.cosine_dist))
-
-
-                    # cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
-                    
+                cs_flow.cs_NHWC = cs_flow.__calculate_CS(relative_dist,temp)
                 return cs_flow
+
+
+
 
     def calc_relative_distances(self,raw_distances, axis=3):
         epsilon = 1e-5
@@ -254,8 +254,15 @@ class CSFlow:
 
 
     @staticmethod
-    def sum_normalize(cs, axis=3): 
+    def sum_normalize(cs, temp = None,axis=3): 
+        if temp is not None :
+            n,h,w,c = temp.shape.as_list()
+            weight_map = tf.compat.v1.get_variable("weight_map",shape=([n,h,w,c ]),dtype=tf.float32,initializer=tf.random_normal_initializer(mean=0.0001,stddev=0)) 
+            temp += weight_map
+            # tf.print("weight_map:",weight_map)
+            cs = tf.math.multiply(cs,temp)
         reduce_sum = tf.math.reduce_sum(cs, axis, keepdims=True, name='sum')
+        # tf.print("reduce_sum:",reduce_sum)
         return tf.divide(cs, reduce_sum, name='sumNormalized') #计算CXij
 
     def center_by_T(self, T_features, I_features):
@@ -282,11 +289,27 @@ class CSFlow:
         return self.T_features_centered, self.I_features_centered
     @staticmethod
 
-    def l2_normalize_channelwise(features,num = 1.0):
-        norms = tf.norm(features, ord='euclidean', axis=3, name='norm')
+    def l2_normalize_channelwise(features,mapBool = False):
+
+        N,H,W,C = features.shape.as_list()
+        if mapBool:
+            
+            mapT  = tf.slice(features,[0,0,0,C-3],[N,H,W,3])
+            features = tf.slice(features,[0,0,0,0],[N,H,W,C-3])
+            # tf.print("features:",tf.shape(features))
+            map_norms = tf.norm(mapT, ord='euclidean', axis=3, name='map_norm')
+            map_norms_expanded = tf.expand_dims(map_norms, 3)
+            map_fea = tf.math.divide_no_nan(mapT, map_norms_expanded, name='map_normalized')
+
+            norms = tf.norm(features, ord='euclidean', axis=3, name='norm')
         # expanding the norms tensor to support broadcast division
-        norms_expanded = tf.expand_dims(norms, 3)
-        features = tf.math.divide_no_nan(features, norms_expanded * num, name='normalized')
+            norms_expanded = tf.expand_dims(norms, 3)
+            features = tf.math.divide_no_nan(features, norms_expanded, name='normalized')
+            features = tf.concat([features,map_fea],3)
+        else:
+            norms = tf.norm(features, ord='euclidean', axis=3, name='norm')
+            norms_expanded = tf.expand_dims(norms, 3)
+            features = tf.math.divide_no_nan(features, norms_expanded, name='normalized')
         return features
 
     def patch_decomposition(self, T_features):
@@ -316,40 +339,16 @@ class CSFlow:
 #--------------------------------------------------
 
 
-def CX_loss(T_features, I_features,T_map_features,I_map_features, nnsigma=float(1.0)):
+def CX_loss(T_features, I_features,isStyle, nnsigma=float(1.0)):
     T_features = tf.convert_to_tensor(T_features, dtype=tf.float32)
     I_features = tf.convert_to_tensor(I_features, dtype=tf.float32)
 
     with tf.name_scope('CX'):
-        cs_flow = CSFlow.create_using_dotP(I_features, T_features,T_map_features,I_map_features, nnsigma, float(1.0))
+        cs_flow = CSFlow.create_using_dotP(I_features, T_features,isStyle, nnsigma, float(1.0))
         # sum_normalize:
         height_width_axis = [1, 2]
-        # To:
-        # x=[[[[[1.0,6.0],[2.0,4.0]],[[3.0,4.0],[7.0,2.0]]],[[[1.0,3.0],[4.0,6.0]],[[8.0,5.0],[1.0,10.0]]]]]
-        # # x = [[1,2],[3,4],[0,5],[2,6]]
-        # tf.print("x shape:",tf.shape(x))
-        # tf.print("cs_flow:",cs_flow.cs_NHWC)
-        if T_map_features is not None and I_map_features is not None: 
-            cs_NHWC = tf.expand_dims(cs_flow.cs_NHWC,axis = 4)
-            sem_cs_NHWC = tf.expand_dims(cs_flow.sem_cs_NHWC,axis = 4)
-            cs = tf.concat([sem_cs_NHWC,cs_NHWC],axis = 4)
 
-            # dataMax = tf.argmax(cs,axis=)
-
-            _,h,w,n,_ = cs.shape.as_list()
-            cxij_matrix = cs.numpy() #将tensor 转换为 numpy对象，否则运行起来会非常慢，因为在下面这行代码的循环中，将不停的把tensor对象放入计算图
-            # tf.print("cs:",cs)
-            # k_max_NC = [ cxij_list[tf.argmax(cxij_list[i,:,:],axis = 0)[0],1] for i in range(h*w)]
-            k_max_NC = []
-            for i in range(h):
-                for j in range(w):
-                    CXij_list = cxij_matrix[0,i,j,:,:]
-                    max = tf.argmax(CXij_list,axis = 0)[0]
-                    k_max_NC.append(CXij_list[max,1])
-
-            k_max_NC = [k_max_NC]
-        else:
-            k_max_NC = tf.math.reduce_max(cs_flow.cs_NHWC, axis=height_width_axis) #找到CXij集合中最大的CXij
+        k_max_NC = tf.math.reduce_max(cs_flow.cs_NHWC, axis=height_width_axis) #找到CXij集合中最大的CXij
 
 
 
@@ -358,7 +357,7 @@ def CX_loss(T_features, I_features,T_map_features,I_map_features, nnsigma=float(
         CX_as_loss = 1 - CS
         CX_loss = -tf.math.log(1 - CX_as_loss)
         CX_loss = tf.math.reduce_mean(CX_loss) #返回损失值，一个float32
-        # print("CXLOSS：{}".format(float(CX_loss)))
+        tf.print("CXLOSS：",float(CX_loss))
         return CX_loss
 
 #--------------------------------------------------
@@ -418,22 +417,25 @@ def crop_quarters(feature_tensor):
     return feature_tensor
 
 
-def CX_loss_helper(T_features,I_features,nnsigma=float(0.5),T_map_features=None,I_map_features=None):
+def CX_loss_helper(T_features,I_features,isStyle = True,nnsigma=float(0.5),T_map_features=None,I_map_features=None):
     # if CX_config.crop_quarters is True:
     #     T_features = crop_quarters(T_features)
     #     I_features = crop_quarters(I_features)
     # if T_map_features is not None and I_map_features is not None :
     #     T_features = tf.concat([T_features,T_map_features],3)
     #     I_features = tf.concat([I_features,I_map_features],3)
-
+    if T_map_features is not None and I_map_features is not None:
+        T_map_features = tf.cast(T_map_features, dtype=tf.float32)
+        I_map_features = tf.cast(I_map_features, dtype=tf.float32)
+        T_features = tf.concat([T_features,T_map_features],3)
+        I_features = tf.concat([I_features,I_map_features],3)
 
     N, fH, fW, fC = T_features.shape.as_list()
     if fH * fW <= 65 ** 2:
         print(' #### Skipping pooling for CX....')
     else:
+        
         T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
-        if T_map_features is not None and I_map_features is not None:
-            T_map_features, I_map_features = random_pooling(T_map_features, I_map_features, output_1d_size=65)
 
 
     # if T_map_features is not None and I_map_features is not None:
@@ -453,7 +455,7 @@ def CX_loss_helper(T_features,I_features,nnsigma=float(0.5),T_map_features=None,
     # tf.print("after,tshape:",tf.shape(T_features))
     # tf.print("after,Ishape:",tf.shape(I_features))
 
-    loss = CX_loss(T_features, I_features,T_map_features,I_map_features,nnsigma)
+    loss = CX_loss(T_features, I_features,isStyle,nnsigma)
     # tf.print("LOSS:",loss)
     return loss
 
@@ -512,7 +514,7 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
 
     # tf.print("num_style_layers:",num_style_layers)
     #有待改进，重复
-    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.2),style_map_targets[name],current_map_targets[name]) for name in style_outputs.keys()])
+    style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],True , float(0.2),style_map_targets[name],current_map_targets[name]) for name in style_outputs.keys()])
     style_loss *= args.style_weight / num_style_layers
 
     tf.print("style_loss:",style_loss)
@@ -522,7 +524,7 @@ def style_content_loss(outputs,style_targets,style_map_targets,content_targets,c
 
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
-    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
+    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],False,float(0.1)) for name in content_outputs.keys()])
     content_loss *= args.content_weight / num_content_layers
     tf.print("content_loss:",content_loss)
 
