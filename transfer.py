@@ -25,8 +25,8 @@ add_arg('--content',        default=None, type=str,         help='Content image 
 add_arg('--content-weight', default=10, type=float,       help='Weight of content relative to style.')
 add_arg('--content-layers', default='block4_conv2', type=str,        help='The layer with which to match content.')
 add_arg('--style',          default=None, type=str,         help='Style image path to extract patches.')
-add_arg('--style-weight',   default=15.0, type=float,       help='Weight of style relative to content.')
-add_arg('--style-layers',   default='block2_conv2,block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
+add_arg('--style-weight',   default=25.0, type=float,       help='Weight of style relative to content.')
+add_arg('--style-layers',   default='block3_conv2,block4_conv2', type=str,    help='The layers to match style patches.')
 add_arg('--semantic-ext',   default='_sem.png', type=str,   help='File extension for the semantic maps.')
 add_arg('--semantic-weight', default=10.0, type=float,      help='Global weight of semantics vs. features.')
 add_arg('--output',         default='output.png', type=str, help='Output image path to save once done.')
@@ -153,25 +153,52 @@ class CSFlow:
             # prepare feature before calculating cosine distance
             T_features, I_features = cs_flow.center_by_T(T_features, I_features)
             with tf.name_scope('TFeatures'):
-                T_features = CSFlow.l2_normalize_channelwise(T_features)
+                patch_size = 3 #将图像切分为3*3的patch
+                
+                T_features = tf.image.extract_patches(
+                    images=T_features, sizes=[1, patch_size, patch_size, 1],
+                    strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
+                    name='patches_as_depth_vectors')
+                # tf.print("tfe:",tf.shape(T_features))
+                T_features_norm = CSFlow.l2_normalize_channelwise(T_features)
             with tf.name_scope('IFeatures'):
-                I_features = CSFlow.l2_normalize_channelwise(I_features)
+                
                 # work seperatly for each example in dim 1
 
-                tf.print("Tfeatures:",tf.shape(T_features))
-                tf.print("Ifeatures:",tf.shape(I_features))
-                cosine_dist_l = []
-                N, _, __, ___ = T_features.shape.as_list()
-                for i in range(N):
-                    T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
-                    I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
-                    patches_HWCN_i = cs_flow.patch_decomposition(T_features_i)
-                    tf.print("patches_HWCN_i:",tf.shape(patches_HWCN_i))
-                    cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
-                                                        padding='VALID', name='cosine_dist')
-                    tf.print("cosine_dist_i:",tf.shape(cosine_dist_i))
-                    cosine_dist_l.append(cosine_dist_i)
-                cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
+                # tf.print("Tfeatures:",tf.shape(T_features))
+                # tf.print("Ifeatures:",tf.shape(I_features))
+                # cosine_dist_l = []
+                # N, _, __, ___ = T_features.shape.as_list()
+                
+
+
+                # T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
+                # I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
+
+
+                patches_NHWC = tf.reshape(
+                    T_features_norm,
+                    shape=[-1, 1, 1, T_features_norm.shape[3]],
+                    name='patches_PHWC')
+
+                patches_HWCN = tf.transpose(
+                    patches_NHWC,
+                    perm=[1, 2, 3, 0],
+                    name='patches_HWCP') 
+                
+                I_features = tf.image.extract_patches(
+                    images=I_features, sizes=[1, 3, 3, 1],
+                    strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
+                    name='I_patches_as_depth_vectors')
+                I_features_norm = CSFlow.l2_normalize_channelwise(I_features)
+                cs_flow.cosine_dist = tf.nn.conv2d(I_features_norm, patches_HWCN, strides=[1, 1, 1, 1],
+                                                    padding='VALID', name='cosine_dist')
+
+                cs_flow.patch_loss = cs_flow.match_patches(T_features,I_features,cs_flow.cosine_dist)
+                # tf.print("cosine_dist:",tf.shape(cosine_dist))
+                # cosine_dist_l.append(cosine_dist)
+
+                # cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
 
                 cosine_dist_zero_to_one = -(cs_flow.cosine_dist - 1) / 2
                 cs_flow.raw_distances = cosine_dist_zero_to_one
@@ -179,6 +206,45 @@ class CSFlow:
                 relative_dist = cs_flow.calc_relative_distances()
                 cs_flow.__calculate_CS(relative_dist)
                 return cs_flow
+
+    def match_patches(self,T_features,I_features,cosine_dist):
+
+        T_features = tf.reshape(T_features,shape = [-1,T_features.shape[3]])
+        I_features = tf.reshape(I_features,shape = [-1,I_features.shape[3]])
+        cosine_dist = tf.reshape(cosine_dist,shape = [-1,cosine_dist.shape[3]])
+       
+        # for patch in I_features:
+
+        #     cosine_dist_i = []
+        #     for t_patch in T_features:
+
+        #         cosine = tf.reduce_sum(tf.multiply(patch,t_patch))
+        #         cosine_dist_i.append(cosine)
+        #     # tf.print("match_patches in",cosine_dist_i)
+        #     cosine_dist.append(cosine_dist_i)
+        match_idx = tf.argmax(cosine_dist,axis=1)
+        #     cov_match_idx = tf.argmax(conv_dist,axis=1)
+        #     tf.print("match_idx:",match_idx)
+        #     tf.print("cov_match_idx:",cov_match_idx)
+            # tf.print("cosine_dist:",cosine_dist)
+
+        # tf.print("T_features:",T_features)
+        # tf.print("I_features:",tf.shape(I_features))
+        # tf.print("cosine_dist:",tf.shape(cosine_dist))
+        # tf.print("cosine_dist:",cosine_dist)
+
+        match_list = tf.gather(T_features,match_idx)
+
+        # for i in match_idx:
+        #     match_list.append(T_features[i])
+        # tf.print("match_list:",tf.shape(match_list))
+        # tf.print("match_list:",match_list)
+        # patch_mean = tf.reduce_mean((I_features - match_list) ** 2,axis = 1)
+        # tf.print("patch_mean shape:",tf.shape(patch_mean))
+        # tf.print("patch_mean:",patch_mean)
+        loss = tf.reduce_mean((I_features - match_list) ** 2)
+        
+        return loss
 
     def calc_relative_distances(self, axis=3):
         epsilon = 1e-5
@@ -228,24 +294,27 @@ class CSFlow:
     def l2_normalize_channelwise(features):
         norms = tf.norm(features, ord='euclidean', axis=3, name='norm')
         # expanding the norms tensor to support broadcast division
+        # tf.print("norm:",tf.shape(norms))
         norms_expanded = tf.expand_dims(norms, 3)
+        # tf.print("norms_expanded:",tf.shape(norms_expanded))
         features = tf.divide(features, norms_expanded, name='normalized')
         return features
 
     def patch_decomposition(self, T_features):
         # patch decomposition
         # see https://stackoverflow.com/questions/40731433/understanding-tf-extract-image-patches-for-extracting-patches-from-an-image
-        patch_size = 1
+        patch_size = 3 #将图像切分为3*3的patch
+        tf.print("tfe:",tf.shape(T_features))
         patches_as_depth_vectors = tf.image.extract_patches(
             images=T_features, sizes=[1, patch_size, patch_size, 1],
-            strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
+            strides=[1, patch_size, patch_size, 1], rates=[1, 1, 1, 1], padding='VALID',
             name='patches_as_depth_vectors')
-
+        tf.print("patches_as_depth_vectors:",tf.shape(patches_as_depth_vectors))
         self.patches_NHWC = tf.reshape(
             patches_as_depth_vectors,
-            shape=[-1, patch_size, patch_size, patches_as_depth_vectors.shape[3]],
+            shape=[-1, 1, 1, patches_as_depth_vectors.shape[3]],
             name='patches_PHWC')
-
+        tf.print("patches_as_depth_vectors:",tf.shape(self.patches_NHWC))
         self.patches_HWCN = tf.transpose(
             self.patches_NHWC,
             perm=[1, 2, 3, 0],
@@ -253,6 +322,118 @@ class CSFlow:
 
         return self.patches_HWCN
 
+
+    def do_extract_patches(self,features):
+        patch_size = 3 #将图像切分为3*3的patch
+        patches_as_depth_vectors = tf.image.extract_patches(
+            images=features, sizes=[1, patch_size, patch_size, 1],
+            strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
+            name='patches_as_depth_vectors')
+        patches_list = tf.reshape(
+            patches_as_depth_vectors,
+            shape=[-1, patches_as_depth_vectors.shape[3]],
+            name='patches_PHWC')
+        norms = tf.norm(patches_list, ord='euclidean', axis=1, name='norm')
+        return patches_list
+
+#--------------------------------------------------
+#     MRF help
+#--------------------------------------------------
+def mrf_loss(style_layer, generated_layer, patch_size=3, name=''):
+    # type: (tf.Tensor, tf.Tensor, int, str) -> tf.Tensor
+    """
+
+    :param style_layer: The vgg feature layer by feeding it the style image.
+    :param generated_layer: The vgg feature layer by feeding it the generated image.
+    :param patch_size: The patch size of the mrf.
+    :param name: Name scope of this loss.
+    :return: the mrf loss between the two inputted layers represented as a scalar tensor.
+    """
+
+    # TODO: Maybe I should make style_layer static to improve speed.
+    with tf.name_scope('mrf_loss' + name):
+        generated_layer_patches = create_local_patches(generated_layer, patch_size)
+        style_layer_patches = create_local_patches(style_layer, patch_size)
+        generated_layer_nn_matched_patches = patch_matching(generated_layer_patches, style_layer_patches, patch_size)
+        # _, height, width, number = map(lambda i: i.value, generated_layer.get_shape())
+        _, height, width, number = generated_layer.shape.as_list()
+        size = height * width * number
+        # Normalize by the size of the image as well as the patch area.
+        loss = tf.divide(tf.reduce_sum(tf.math.square(tf.math.subtract(generated_layer_patches, generated_layer_nn_matched_patches))),
+                      size * (patch_size ** 2))
+        return loss
+
+
+def create_local_patches(layer, patch_size, padding='VALID'):
+    # type: (tf.Tensor, int, str) -> tf.Tensor
+    """
+
+    :param layer: Feature layer tensor with dimension (1, height, width, feature)
+    :param patch_size: The width and height of the patch. It is set to 3 in the paper https://arxiv.org/abs/1601.04589
+    :param padding: a string representing the padding style.
+    :return: Patches with dimension (cardinality, patch_size, patch_size, feature)
+    """
+    return tf.image.extract_patches(layer, sizes=[1, patch_size, patch_size, 1],
+                                    strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding=padding)
+
+
+def patch_matching(generated_layer_patches, style_layer_patches, patch_size):
+    # type: (tf.Tensor, tf.Tensor, int) -> tf.Tensor
+    """
+    The patch matching is implemented as an additional convolutional layer for fast computation.
+    In this case patches sampled from the style image are treated as the filters.
+    :param generated_layer_patches: Size (batch, height, width, patch_size * patch_size * feature)
+    :param style_layer_patches:Size (1, height, width, patch_size * patch_size * feature)
+    :param patch_size: the patch size for mrf.
+    :return: Best matching patch with size (batch, height, width, patch_size * patch_size * feature)
+    """
+    # Every patch and every feature layer are treated as equally important after normalization.
+    normalized_generated_layer_patches = tf.math.l2_normalize(generated_layer_patches, axis=[3])
+    normalized_style_layer_patches = tf.math.l2_normalize(style_layer_patches, axis=[3])
+    # A better way to do this is to treat them as convolutions.
+    # They have to be in dimension
+    # (height * width, patch_size, patch_size, feature) <=> (batch, in_height, in_width, in_channels)
+    # (patch_size, patch_size, feature, height * width) <= > (filter_height, filter_width, in_channels, out_channels)
+    # Initially they are in [batch, out_rows, out_cols, patch_size * patch_size * depth]
+    original_shape = normalized_style_layer_patches.get_shape().as_list()
+    height = original_shape[1]
+    width = original_shape[2]
+    depth = tf.cast(original_shape[3] / patch_size / patch_size,tf.int32)
+    # tf.print("depth",depth)
+    normalized_style_layer_patches = tf.squeeze(normalized_style_layer_patches)
+
+    normalized_style_layer_patches = tf.reshape(normalized_style_layer_patches,
+                                                [height, width, patch_size, patch_size, depth])
+    normalized_style_layer_patches = tf.reshape(normalized_style_layer_patches,
+                                                [height * width, patch_size, patch_size, depth])
+    normalized_style_layer_patches = tf.transpose(normalized_style_layer_patches, perm=[1, 2, 3, 0])
+    style_layer_patches_reshaped = tf.reshape(style_layer_patches, [height, width, patch_size, patch_size, depth])
+    style_layer_patches_reshaped = tf.reshape(style_layer_patches_reshaped,
+                                              [height * width, patch_size, patch_size, depth])
+
+    normalized_generated_layer_patches_per_batch = tf.unstack(normalized_generated_layer_patches, axis=0)
+    ret = []
+    for batch in normalized_generated_layer_patches_per_batch:
+        original_shape = batch.get_shape().as_list()
+        height = original_shape[0]
+        width = original_shape[1]
+        depth = tf.cast(original_shape[2] / patch_size / patch_size,tf.int32)
+        batch = tf.squeeze(batch)
+
+        batch = tf.reshape(batch, [height, width, patch_size, patch_size, depth])
+        batch = tf.reshape(batch, [height * width, patch_size, patch_size, depth])
+        # According to images-analogies github, for cross-correlation, we should flip the kernels
+        # That is normalized_style_layer_patches should be [:, ::-1, ::-1, :]
+        # I didn't see that in any other source, nor do I see why I should do so.
+        convs = tf.nn.conv2d(batch, normalized_style_layer_patches, strides=[1, 1, 1, 1], padding='VALID')
+        argmax = tf.squeeze(tf.argmax(convs, axis=3))
+        # best_match has shape [height * width, patch_size, patch_size, depth]
+        best_match = tf.gather(style_layer_patches_reshaped, indices=argmax)
+        best_match = tf.reshape(best_match, [height, width, patch_size, patch_size, depth])
+        best_match = tf.reshape(best_match, [height, width, patch_size * patch_size * depth])
+        ret.append(best_match)
+    ret = tf.stack(ret)
+    return ret
 
 #--------------------------------------------------
 #           CX loss
@@ -274,8 +455,8 @@ def CX_loss(T_features, I_features, nnsigma=float(1.0)):
         CX_as_loss = 1 - CS
         CX_loss = -tf.math.log(1 - CX_as_loss)
         CX_loss = tf.math.reduce_mean(CX_loss) #返回损失值，一个float32
-        print("CXLOSS：{}".format(float(CX_loss)))
-        return CX_loss
+        # print("CXLOSS：{}".format(float(CX_loss)))
+        return cs_flow.patch_loss * (CX_loss + 1 )
 
 #--------------------------------------------------
 #           CX loss helper
@@ -338,15 +519,32 @@ def CX_loss_helper(T_features, I_features,nnsigma=float(0.5)):
     # if CX_config.crop_quarters is True:
     #     T_features = crop_quarters(T_features)
     #     I_features = crop_quarters(I_features)
-    N, fH, fW, fC = T_features.shape.as_list()
-    if fH * fW <= 65 ** 2:
-        print(' #### Skipping pooling for CX....')
-    else:
-        # T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
-        T_features = tf.nn.avg_pool(T_features,,[1,1,1,1],padding = 'VALID')
+    # _, fH, fW, fC = T_features.shape.as_list()
+    # fS = fH * fW
+    
+    # if fS <= 65 ** 2:
+    #     print(' #### Skipping pooling for CX....')
+    # else:
+    #     T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
+        # fSzie = int(max(fH,fW) / 65)
+        # max_features = tf.nn.max_pool(T_features,[1,fSzie,fSzie,1],[1,fSzie,fSzie,1],padding = 'VALID')
+        # avg_features = tf.nn.avg_pool(T_features,[1,fSzie,fSzie,1],[1,fSzie,fSzie,1],padding = 'VALID')
+        # T_features = 0.5 * (max_features + avg_features)
+
+
+    # N, iH, iW, iC = I_features.shape.as_list()
+    # iS = iH * iW
+    
+    # if iS <= 65 ** 2:
+    #     print(' #### Skipping pooling for CX....')
+    # else:
+    #     iSzie = int(max(iH,iW) / 65)
+    #     I_max_features = tf.nn.max_pool(I_features,[1,iSzie,iSzie,1],[1,iSzie,iSzie,1],padding = 'VALID')
+    #     I_avg_features = tf.nn.avg_pool(I_features,[1,iSzie,iSzie,1],[1,iSzie,iSzie,1],padding = 'VALID')
+    #     I_features = 0.5 * (I_max_features + I_avg_features)
 
     loss = CX_loss(T_features, I_features,nnsigma)
-    print("LOSS:{}".format(loss))
+    # loss = mrf_loss(T_features,I_features)
     return loss
 
 #------------------------------------------------------------
@@ -402,22 +600,23 @@ def style_content_loss(outputs,style_targets,content_targets):
     # style_loss = tf.add_n([tf.reduce_mean((style_outputs[name]-style_targets[name])**2) 
     #                        for name in style_outputs.keys()])
 
-    tf.print("num_style_layers:",num_style_layers)
+    # tf.print("num_style_layers:",num_style_layers)
     #有待改进，重复
     style_loss = tf.add_n([CX_loss_helper(style_targets[name],style_outputs[name],float(0.2)) for name in style_outputs.keys()])
+    # style_loss *= args.style_weight / num_style_layers
     style_loss *= args.style_weight / num_style_layers
 
-    tf.print("style_loss:",style_loss)
-    # content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
-                             # for name in content_outputs.keys()])
+    # tf.print("style_loss:",style_loss)
+    content_loss = tf.add_n([tf.reduce_mean((content_outputs[name]-content_targets[name])**2) 
+                             for name in content_outputs.keys()])
 
     # print("content_outputs:{}".format(content_outputs.keys()))
     # print("content_targets:{}".format(content_targets.keys()))
-    content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
+    # content_loss = tf.add_n([CX_loss_helper(content_targets[name],content_outputs[name],float(0.1)) for name in content_outputs.keys()])
     content_loss *= args.content_weight / num_content_layers
-    tf.print("content_loss:",content_loss)
+    # tf.print("content_loss:",content_loss)
     loss = style_loss + content_loss
-    return loss
+    return loss, style_loss, content_loss
 
 
 
@@ -438,10 +637,10 @@ def run(content_path,style_path):
     outputImage_height= outputSize[0]
     outputImage_wight = outputSize[1]
 
-    # image = tf.compat.v1.get_variable("outputImage",shape=([1,content_image.shape[1],content_image.shape[2],3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=1)) #
+    image = tf.compat.v1.get_variable("outputImage",shape=([1,content_image.shape[1],content_image.shape[2],3]),dtype=tf.float64,initializer=tf.random_normal_initializer(mean=0,stddev=120)) #
 
     # image = tf.image.resize(image,[content_image.shape[1],content_image.shape[2]])
-    image = tf.Variable(content_image)
+    # image = tf.Variable(content_image)
     opt = tf.optimizers.Adam(learning_rate=1, beta_1=0.9, epsilon=1e-1)
 
     start = time.time()
@@ -469,10 +668,10 @@ def run(content_path,style_path):
 def train_step(image,extractor,style_targets,content_targets,opt):
     with tf.GradientTape() as tape:
         outputs = extractor(image)
-        loss = style_content_loss(outputs,style_targets,content_targets)
+        loss,style_loss, content_loss = style_content_loss(outputs,style_targets,content_targets)
 
     # tf.compat.v1.logging.info("loss:%f",float(loss))
-    tf.print("loss:",loss)
+    tf.print("this function ",["loss:",loss / 1000.0,"style_loss:",style_loss / 1000.0,"content_loss:",content_loss / 1000.0])
     grad = tape.gradient(loss, image)
     # print("grad:{}".format(grad))
     opt.apply_gradients([(grad, image)])
