@@ -433,7 +433,7 @@ def CX_loss(T_features, I_features, nnsigma=float(1.0)):
         CX_loss = -tf.math.log(1 - CX_as_loss)
         CX_loss = tf.math.reduce_mean(CX_loss) #返回损失值，一个float32
         # print("CXLOSS：{}".format(float(CX_loss)))
-        return cs_flow.patch_loss 
+        return cs_flow.patch_loss * (CX_loss + 1 )
 
 #--------------------------------------------------
 #           CX loss helper
