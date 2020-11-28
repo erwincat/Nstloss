@@ -149,6 +149,7 @@ class CSFlow:
     @staticmethod
     def create_using_dotP(I_features, T_features, sigma = float(1.0), b = float(1.0)):
         cs_flow = CSFlow(sigma, b)
+        # tf.print("create_using_dotP")
         with tf.name_scope('CS'):
             # prepare feature before calculating cosine distance
             T_features, I_features = cs_flow.center_by_T(T_features, I_features)
@@ -157,7 +158,7 @@ class CSFlow:
                 
                 T_features = tf.image.extract_patches(
                     images=T_features, sizes=[1, patch_size, patch_size, 1],
-                    strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
+                    strides=[1, patch_size, patch_size, 1], rates=[1, 1, 1, 1], padding='VALID',
                     name='patches_as_depth_vectors')
                 # tf.print("tfe:",tf.shape(T_features))
                 T_features_norm = CSFlow.l2_normalize_channelwise(T_features)
@@ -188,7 +189,7 @@ class CSFlow:
                 
                 I_features = tf.image.extract_patches(
                     images=I_features, sizes=[1, 3, 3, 1],
-                    strides=[1, 1, 1, 1], rates=[1, 1, 1, 1], padding='VALID',
+                    strides=[1, 3, 3, 1], rates=[1, 1, 1, 1], padding='VALID',
                     name='I_patches_as_depth_vectors')
                 I_features_norm = CSFlow.l2_normalize_channelwise(I_features)
                 cs_flow.cosine_dist = tf.nn.conv2d(I_features_norm, patches_HWCN, strides=[1, 1, 1, 1],
@@ -213,35 +214,11 @@ class CSFlow:
         I_features = tf.reshape(I_features,shape = [-1,I_features.shape[3]])
         cosine_dist = tf.reshape(cosine_dist,shape = [-1,cosine_dist.shape[3]])
        
-        # for patch in I_features:
-
-        #     cosine_dist_i = []
-        #     for t_patch in T_features:
-
-        #         cosine = tf.reduce_sum(tf.multiply(patch,t_patch))
-        #         cosine_dist_i.append(cosine)
-        #     # tf.print("match_patches in",cosine_dist_i)
-        #     cosine_dist.append(cosine_dist_i)
         match_idx = tf.argmax(cosine_dist,axis=1)
-        #     cov_match_idx = tf.argmax(conv_dist,axis=1)
-        #     tf.print("match_idx:",match_idx)
-        #     tf.print("cov_match_idx:",cov_match_idx)
-            # tf.print("cosine_dist:",cosine_dist)
 
-        # tf.print("T_features:",T_features)
-        # tf.print("I_features:",tf.shape(I_features))
-        # tf.print("cosine_dist:",tf.shape(cosine_dist))
-        # tf.print("cosine_dist:",cosine_dist)
 
         match_list = tf.gather(T_features,match_idx)
 
-        # for i in match_idx:
-        #     match_list.append(T_features[i])
-        # tf.print("match_list:",tf.shape(match_list))
-        # tf.print("match_list:",match_list)
-        # patch_mean = tf.reduce_mean((I_features - match_list) ** 2,axis = 1)
-        # tf.print("patch_mean shape:",tf.shape(patch_mean))
-        # tf.print("patch_mean:",patch_mean)
         loss = tf.reduce_mean((I_features - match_list) ** 2)
         
         return loss
@@ -456,7 +433,7 @@ def CX_loss(T_features, I_features, nnsigma=float(1.0)):
         CX_loss = -tf.math.log(1 - CX_as_loss)
         CX_loss = tf.math.reduce_mean(CX_loss) #返回损失值，一个float32
         # print("CXLOSS：{}".format(float(CX_loss)))
-        return cs_flow.patch_loss * (CX_loss + 1 )
+        return cs_flow.patch_loss 
 
 #--------------------------------------------------
 #           CX loss helper
