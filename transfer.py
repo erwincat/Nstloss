@@ -82,13 +82,13 @@ def load_img(path_to_img):
   img = tf.image.decode_image(img, channels=3)
   img = tf.image.convert_image_dtype(img, tf.float64)
 
-  # shape = tf.cast(tf.shape(img)[:-1], tf.float64)
-  # long_dim = max(shape)
-  # scale = max_dim / long_dim
+  shape = tf.cast(tf.shape(img)[:-1], tf.float64)
+  long_dim = max(shape)
+  scale = max_dim / long_dim
 
-  # new_shape = tf.cast(shape * scale, tf.int32)
+  new_shape = tf.cast(shape * scale, tf.int32)
 
-  # img = tf.image.resize(img, new_shape)
+  img = tf.image.resize(img, new_shape)
   img = img[tf.newaxis, :]
   return img
 
@@ -158,18 +158,18 @@ class CSFlow:
                 I_features = CSFlow.l2_normalize_channelwise(I_features)
                 # work seperatly for each example in dim 1
 
-                tf.print("Tfeatures:",tf.shape(T_features))
-                tf.print("Ifeatures:",tf.shape(I_features))
+                # tf.print("Tfeatures:",tf.shape(T_features))
+                # tf.print("Ifeatures:",tf.shape(I_features))
                 cosine_dist_l = []
                 N, _, __, ___ = T_features.shape.as_list()
                 for i in range(N):
                     T_features_i = tf.expand_dims(T_features[i, :, :, :], 0)
                     I_features_i = tf.expand_dims(I_features[i, :, :, :], 0)
                     patches_HWCN_i = cs_flow.patch_decomposition(T_features_i)
-                    tf.print("patches_HWCN_i:",tf.shape(patches_HWCN_i))
+                    # tf.print("patches_HWCN_i:",tf.shape(patches_HWCN_i))
                     cosine_dist_i = tf.nn.conv2d(I_features_i, patches_HWCN_i, strides=[1, 1, 1, 1],
                                                         padding='VALID', name='cosine_dist')
-                    tf.print("cosine_dist_i:",tf.shape(cosine_dist_i))
+                    # tf.print("cosine_dist_i:",tf.shape(cosine_dist_i))
                     cosine_dist_l.append(cosine_dist_i)
                 cs_flow.cosine_dist = tf.concat(cosine_dist_l, axis = 0)
 
@@ -274,7 +274,7 @@ def CX_loss(T_features, I_features, nnsigma=float(1.0)):
         CX_as_loss = 1 - CS
         CX_loss = -tf.math.log(1 - CX_as_loss)
         CX_loss = tf.math.reduce_mean(CX_loss) #返回损失值，一个float32
-        print("CXLOSS：{}".format(float(CX_loss)))
+        # print("CXLOSS：{}".format(float(CX_loss)))
         return CX_loss
 
 #--------------------------------------------------
@@ -342,11 +342,11 @@ def CX_loss_helper(T_features, I_features,nnsigma=float(0.5)):
     if fH * fW <= 65 ** 2:
         print(' #### Skipping pooling for CX....')
     else:
-        # T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
-        T_features = tf.nn.avg_pool(T_features,,[1,1,1,1],padding = 'VALID')
+        T_features, I_features = random_pooling(T_features, I_features, output_1d_size=65)
+        # T_features = tf.nn.avg_pool(T_features,,[1,1,1,1],padding = 'VALID')
 
     loss = CX_loss(T_features, I_features,nnsigma)
-    print("LOSS:{}".format(loss))
+    # print("LOSS:{}".format(loss))
     return loss
 
 #------------------------------------------------------------
